@@ -3,7 +3,7 @@
 1. Install Anaconda to your linux system.
 
 > [!NOTE]
-> **To Sugawara**
+> **To Sugawara** \
 > 念の為一連の操作を実行する前に、`.zshrc`に書かれた anaconda に関する設定を消しておくこと
 
    ```
