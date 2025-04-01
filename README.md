@@ -15,7 +15,7 @@
    b. その後`more`が起動するので、`space key`で最後まで行った後、`yes`を入力 \
    c. Anaconda の install 先を聞かれるので、デフォルトのまま`Enter key`を押す。
    (その場合、`${HOME}/anaconda3`にインストールされる) \
-   d. `.zshrc`を変更するか効かれるので、`yes`を入力 \
+   d. `.zshrc`を変更するか聞かれるので、`yes`を入力 \
    e. `conda --version`を実行して、`24.x.x`と表示されれば成功 \
 
 2. Create a conda environment
