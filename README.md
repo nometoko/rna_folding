@@ -1,5 +1,7 @@
 ## Environment Setting
 
+### Installation
+
 1. Install Anaconda to your linux system.
 
 > [!NOTE]
@@ -19,7 +21,6 @@
    e. `conda --version`を実行して、`24.x.x`と表示されれば成功 \
 
 2. Create a conda environment
-
    ```
    % conda create -n rna_folding python=3.9
    % conda activate rna_folding
@@ -37,4 +38,27 @@
    Tesla V100-PCIE-32GB # CUDAのデバイス名を確認
    >>> print(torch.cuda.device_count()) # CUDAのデバイス数を確認
    4 # CUDAのデバイス数を確認
+   ```
+### Share Environment
+
+Anacondaの場合、`environment.yaml`を介してパッケージのバージョンを指定して環境を共有することができる。 \
+
+1. `environment.yaml`を作成する
+   ```
+   % conda env export > environment.yaml
+   % nvim environment.yaml #最終行の`prefix`を消す
+   ```
+
+>> [!NOTE]
+>> `prefix`の部分は絶対パスを含むため、削除する
+
+2. `environment.yaml`を使って環境を作成する
+   ```
+   % conda env create -f environment.yaml
+   % conda activate rna_folding
+   ```
+
+3. `environment.yaml`を使って環境を更新する
+   ```
+   % conda env update --file environment.yaml
    ```
