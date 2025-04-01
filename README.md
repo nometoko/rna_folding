@@ -49,8 +49,8 @@ Anacondaの場合、`environment.yaml`を介してパッケージのバージョ
    % nvim environment.yaml #最終行の`prefix`を消す
    ```
 
->> [!NOTE]
->> `prefix`の部分は絶対パスを含むため、削除する
+> [!NOTE]
+> `prefix`の部分は絶対パスを含むため、削除する
 
 2. `environment.yaml`を使って環境を作成する
    ```
