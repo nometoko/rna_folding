@@ -2,9 +2,9 @@
 
 1. Install Anaconda to your linux system.
 
-   > [!NOTE]
-   > To Sugawara
-   > 念の為一連の操作を実行する前に、`.zshrc`に書かれた anaconda に関する設定を消しておくこと
+> [!NOTE]
+> **To Sugawara**
+> 念の為一連の操作を実行する前に、`.zshrc`に書かれた anaconda に関する設定を消しておくこと
 
    ```
    % curl -O https://repo.anaconda.com/archive/Anaconda3-2024.10-1-Linux-x86_64.sh
