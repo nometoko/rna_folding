@@ -84,24 +84,24 @@
 
 3. `dMAE` (Mean Absolute Error)
 
-   > [!NOTE]
-   > notebook には`dRMAE`と書いてあるが、実装では root を取っていないので`dMAE`の誤植と思われる。
+> [!NOTE]
+> notebook には`dRMAE`と書いてあるが、実装では root を取っていないので`dMAE`の誤植と思われる。
 
-   ```python
-   def dMAE(pred_x, pred_y, gt_x, gt_y, epsilon=1e-4,Z=10,d_clamp=None):
-       pred_dm=calculate_distance_matrix(pred_x,pred_y)
-       gt_dm=calculate_distance_matrix(gt_x,gt_y)
+```python
+def dMAE(pred_x, pred_y, gt_x, gt_y, epsilon=1e-4,Z=10,d_clamp=None):
+    pred_dm=calculate_distance_matrix(pred_x,pred_y)
+    gt_dm=calculate_distance_matrix(gt_x,gt_y)
 
-       mask=~torch.isnan(gt_dm)
-       mask[torch.eye(mask.shape[0]).bool()]=False
+    mask=~torch.isnan(gt_dm)
+    mask[torch.eye(mask.shape[0]).bool()]=False
 
-       # dRMSDでは2乗していたが、dRMAEでは絶対値を取る
-       # d_clampの処理をしないのは2乗しないため大きい値を取らないから?
-       rmsd=torch.abs(pred_dm[mask]-gt_dm[mask])
+    # dRMSDでは2乗していたが、dRMAEでは絶対値を取る
+    # d_clampの処理をしないのは2乗しないため大きい値を取らないから?
+    rmsd=torch.abs(pred_dm[mask]-gt_dm[mask])
 
-       # rootも取らない
-       return rmsd.mean()/Z
-   ```
+    # rootも取らない
+    return rmsd.mean()/Z
+```
 
 4. `align_svd_mae`
 
@@ -109,16 +109,7 @@
 
    ```python
    def align_svd_mae(input, target, Z=10):
-       """
-       Aligns the input (Nx3) to target (Nx3) using SVD-based Procrustes alignment and computes RMSD loss.
 
-       Args:
-           input (torch.Tensor): N(塩基の数？) * 3 (x, y, zの座標)
-           target (torch.Tensor): N(塩基の数？) * 3 (x, y, zの座標)
-
-       Returns:
-           torch.Tensor: MAE loss
-       """
        assert input.shape == target.shape, "Input and target must have the same shape"
 
        # sum(-1)で各塩基の座標を足し合わせて、NaNを含む行(塩基)を除外するマスクを作成
@@ -165,8 +156,8 @@
 - optimizer
 
   - Adam
-  - `learning rate`: 1e-4
-  - `weight decay`: 0.0 \
+  - param: `learning rate`: 1e-4
+  - param: `weight decay`: 0.0 \
      L2 正則化なし \
      Alfa Fold に従っている
 
@@ -186,8 +177,8 @@
          `train_loader`の長さを`batch_size`で割った値であり、1 epoch あたりのイテレーション数を表す。 \
          つまり、1 epoch あたりのイテレーション数は、`train_loader`の長さを`batch_size`で割った値である。
 
-        > [!NOTE]
-        > ChatGPT によると、`len(train_loader)`自体が iteration 数を表すので、`batch_size`で割る必要はないとのこと。
-        > 真偽のほどは不明。
+> [!NOTE]
+> ChatGPT によると、`len(train_loader)`自体が iteration 数を表すので、`batch_size`で割る必要はないとのこと。 \
+> 真偽のほどは不明。
 
       結果として、**cosineAnnealing を適用する epoch 数 \* 1 epoch あたりの iteration 数 = cosineAnnealing を適用する iteration 数**が`T_max`となる。
