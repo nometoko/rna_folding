@@ -130,7 +130,6 @@ def dMAE(pred_x, pred_y, gt_x, gt_y, epsilon=1e-4,Z=10,d_clamp=None):
 
        # Procrustes analysis
        # 2つのdatasetが最もマッチするような回転を求める
-
        cov_matrix = input_centered.T @ target_centered
 
        # SVD to find optimal rotation
@@ -177,7 +176,7 @@ def dMAE(pred_x, pred_y, gt_x, gt_y, epsilon=1e-4,Z=10,d_clamp=None):
          `train_loader`の長さを`batch_size`で割った値であり、1 epoch あたりのイテレーション数を表す。 \
          つまり、1 epoch あたりのイテレーション数は、`train_loader`の長さを`batch_size`で割った値である。
 
-      結果として、**cosineAnnealing を適用する epoch 数 \* 1 epoch あたりの iteration 数 = cosineAnnealing を適用する iteration 数**が`T_max`となる。
+      **epoch 数 \* 1 epoch の iteration 数 = cosineAnnealing を適用する iteration 数**が`T_max`となる。
 
 > [!NOTE]
 > ChatGPT によると、`len(train_loader)`自体が iteration 数を表すので、`batch_size`で割る必要はないとのこと。 \
