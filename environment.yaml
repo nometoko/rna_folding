@@ -2,8 +2,8 @@ name: rna_folding
 channels:
   - pytorch
   - fastai
-  - anaconda
   - conda-forge
+  - anaconda
   - defaults
   - https://repo.anaconda.com/pkgs/main
   - https://repo.anaconda.com/pkgs/r
@@ -166,6 +166,8 @@ dependencies:
   - numexpr=2.10.1=py39h3c60e43_0
   - numpy=1.26.4=py39h5f9d8c6_0
   - numpy-base=1.26.4=py39hb5e798b_0
+  - nvidia-ml-py=12.535.133=py39h06a4308_0
+  - nvitop=1.4.2=pyh707e725_0
   - olefile=0.47=pyhd8ed1ab_1
   - openh264=2.1.1=h4ff587b_0
   - openjpeg=2.4.0=h3ad879b_0
