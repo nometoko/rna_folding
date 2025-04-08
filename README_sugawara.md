@@ -183,6 +183,14 @@
   - [実装コードイメージ](https://zenn.dev/acntechjp/articles/be5bc8fbccafe2)
     ![](figures/finetune_vs_transfer.png)
 
+### 20250407
+ - 気づいたこと
+   - 前回コンペも、大目的は「RNAの3D構造予測」だったっぽい(前回コンペも主催してるSHUJUNの[ディスカッション](https://www.kaggle.com/competitions/stanford-ribonanza-rna-folding/discussion/451853)参照)。
+   - ↑のディスカッションの[コメント](https://www.kaggle.com/competitions/stanford-ribonanza-rna-folding/discussion/451853#2505758)に、当時存在した3D構造を出力するモデルが何個か乗ってる。これらは、Alphafoldの先例に従ってるから、進化的相同性(Multiple Sequence Alignments, MSA)があることを前提としているが、Ribonanza分子の大部分には無いらしい。
+
+今日は(いつか)[Ribonanza 上位解法](https://zenn.dev/nishimoto/articles/14da0f491c7632)を読み進めていきたい
+
+
 
 ## 読みたい
 - [ ] [Ribonanza 日本人の解法](https://qiita.com/SHIBA_TT/items/e6f4fc974d026fab0ebd)
