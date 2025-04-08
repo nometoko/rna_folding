@@ -68,3 +68,9 @@ Anacondaの場合、`environment.yaml`を介してパッケージのバージョ
    ```
    % conda env update --file environment.yaml
    ```
+
+### Install Dataset
+
+``` zsh
+% ./install_dataset.sh
+```
