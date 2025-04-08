@@ -181,3 +181,105 @@ def dMAE(pred_x, pred_y, gt_x, gt_y, epsilon=1e-4,Z=10,d_clamp=None):
 > [!NOTE]
 > ChatGPT によると、`len(train_loader)`自体が iteration 数を表すので、`batch_size`で割る必要はないとのこと。 \
 > 真偽のほどは不明。
+
+## 2025/04/07
+
+### [RibonanzaNet Fine-tune の Discussion](https://www.kaggle.com/competitions/stanford-rna-3d-folding/discussion/565306) を見て (続き)
+
+#### Fine-tune の train (続き)
+
+実際のコードは以下のようになっている。
+
+```python
+scaler = GradScaler()
+
+for epoch in range(epochs):
+    model.train()
+    # progress bar
+    tbar=tqdm(train_loader)
+    total_loss=0
+    # out of memory
+    oom=0
+
+    for idx, batch in enumerate(tbar):
+        try:
+            # sequenceをGPUに転送
+            sequence=batch['sequence'].cuda()
+            # 'xyz'をGPUに転送し、次元の削減 (モデルの出力と同じ次元にするため)
+            gt_xyz=batch['xyz'].cuda().squeeze()
+
+            #with torch.autocast(device_type='cuda', dtype=torch.float16):
+            # sequenceをモデルに入力して、予測された座標を取得し、次元を削減
+            pred_xyz=model(sequence).squeeze()
+
+            # lossの計算
+            loss=dRMAE(pred_xyz,pred_xyz,gt_xyz,gt_xyz) + align_svd_mae(pred_xyz, gt_xyz)
+                #local_dRMSD(pred_xyz,pred_xyz,gt_xyz,gt_xyz)
+
+            # NaNのcheck (NaNは自分自身と等しくない)
+            if loss!=loss:
+                stop
+
+            (loss/batch_size).backward()
+
+            if (idx+1)%batch_size==0 or idx+1 == len(tbar):
+                # 勾配のnormのclip
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1)
+                # parameterの更新
+                optimizer.step()
+                # 勾配の初期化
+                optimizer.zero_grad()
+
+                # 自動混合精度(AMP)を使用する場合のコード (float16に精度を落として計算する)
+                # ------------------------------------------------
+                # scaler.scale(loss/batch_size).backward()
+                # scaler.unscale_(optimizer)
+                # torch.nn.utils.clip_grad_norm_(model.parameters(), 1)
+                # scaler.step(optimizer)
+                # scaler.update()
+                # ------------------------------------------------
+
+                # epoch > cos_epoch の場合、学習率を減少させる
+                if (epoch+1)>cos_epoch:
+                    schedule.step()
+            #schedule.step()
+            total_loss+=loss.item()
+
+            # progress barの更新
+            tbar.set_description(f"Epoch {epoch + 1} Loss: {total_loss/(idx+1)} OOMs: {oom}")
+
+        except Exception:
+            print(Exception)
+            oom+=1
+
+    tbar=tqdm(val_loader)
+    # modelをvalidationモードに設定
+    # 評価モードでは、ドロップアウトやバッチ正規化が無効になる
+    model.eval()
+    val_preds=[]
+    val_loss=0
+
+    # validation loop
+    for idx, batch in enumerate(tbar):
+        sequence=batch['sequence'].cuda()
+        gt_xyz=batch['xyz'].cuda().squeeze()
+
+        # 勾配を計算しない
+        with torch.no_grad():
+            pred_xyz=model(sequence).squeeze()
+            loss=dRMAE(pred_xyz,pred_xyz,gt_xyz,gt_xyz)
+
+        val_loss+=loss.item()
+        val_preds.append([gt_xyz.cpu().numpy(),pred_xyz.cpu().numpy()])
+
+    val_loss=val_loss/len(tbar)
+    print(f"val loss: {val_loss}")
+
+    # best modelの保存
+    if val_loss < best_val_loss:
+        best_val_loss=val_loss
+        best_preds=val_preds
+        torch.save(model.state_dict(),'RibonanzaNet-3D.pt')
+
+torch.save(model.state_dict(),'RibonanzaNet-3D-final.pt')
+```
