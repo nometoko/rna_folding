@@ -37,13 +37,13 @@
    % python
    >>> import torch
    >>> print(torch.cuda.is_available()) # CUDAが使えるか確認
-   True # CUDAが使える場合
+   True
    >>> print(torch.cuda.current_device()) # CUDAのデバイス番号を確認
-   0 # CUDAのデバイス番号を確認
+   0
    >>> print(torch.cuda.get_device_name(0)) # CUDAのデバイス名を確認
-   Tesla V100-PCIE-32GB # CUDAのデバイス名を確認
+   Tesla V100-PCIE-32GB
    >>> print(torch.cuda.device_count()) # CUDAのデバイス数を確認
-   4 # CUDAのデバイス数を確認
+   4
    ```
 ### Share Environment
 
