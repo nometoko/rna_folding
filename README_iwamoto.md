@@ -322,276 +322,266 @@ torch.save(model.state_dict(),'RibonanzaNet-3D-final.pt')
 
 #### `Network.py`
 
-<details>
-<summary>活性化関数 Mish</summary>
+1. 活性化関数 Mish
+    [原著論文](https://arxiv.org/abs/1908.08681v3) \
+    式は以下の通り
 
-[原著論文](https://arxiv.org/abs/1908.08681v3) \
-式は以下の通り
+    $$
+    \begin{align*}
+    f(x) &= x \cdot \tanh(\mathrm{softplus}(x)) \\
+    \mathrm{softplus}(x) &= \log(1 + e^x)
+    \end{align*}
+    $$
 
-$$
-\begin{align*}
-f(x) &= x \cdot \tanh(\mathrm{softplus}(x)) \\
-\mathrm{softplus}(x) &= \log(1 + e^x)
-\end{align*}
-$$
+    > [!NOTE]
+    > ChatGPT曰く、「ReLU や Swish のような非線形活性化関数の一種で、滑らかで勾配消失が少なく、高速収束が期待できることから、深層学習でよく使われます。」とのこと。
 
-> [!NOTE]
-> ChatGPT曰く、「ReLU や Swish のような非線形活性化関数の一種で、滑らかで勾配消失が少なく、高速収束が期待できることから、深層学習でよく使われます。」とのこと。
+    <details>
+    <summary>実装</summary>
 
-<details>
-<summary>実装</summary>
+    ```python
+    class Mish(nn.Module):
+        def __init__(self):
+            super().__init__()
 
-```python
-class Mish(nn.Module):
-    def __init__(self):
-        super().__init__()
+        def forward(self, x):
+            # 一時変数を使用せずに、直接計算を行うと1 epochあたり 1s 短縮らしい
+            return x * (torch.tanh(F.softplus(x)))
+    ```
 
-    def forward(self, x):
-        # 一時変数を使用せずに、直接計算を行うと1 epochあたり 1s 短縮らしい
-        return x * (torch.tanh(F.softplus(x)))
-```
+    </details>
 
-</details>
-</details>
+2. Generalized Mean Pooling (GeM)
 
-<details>
-<summary>Generalized Mean Pooling (GeM) </summary>
+    [原著論文](https://ieeexplore.ieee.org/document/8382272) \
+    [zenn](https://zenn.dev/takoroy/scraps/151d11817e3700)を見よう。
 
-[原著論文](https://ieeexplore.ieee.org/document/8382272) \
-[zenn](https://zenn.dev/takoroy/scraps/151d11817e3700)を見よう。
+    GeMはテンソルの各チャネルの一般化平均を計算するプーリング手法で、以下の式で表される。
 
-GeMはテンソルの各チャネルの一般化平均を計算するプーリング手法で、以下の式で表される。
+    $$
+    \mathbf{e} = \left[ \left( \frac{1}{|\Omega|} \sum_{u \in \Omega} x^p_{cu} \right)^\frac{1}{p} \right]_{c = 1, \cdots, C}
+    $$
 
-$$
-\mathbf{e} = \left[ \left( \frac{1}{|\Omega|} \sum_{u \in \Omega} x^p_{cu} \right)^\frac{1}{p} \right]_{c = 1, \cdots, C}
-$$
+    ここで$p > 0$はパラメータであり、$p > 1$の場合は、プールされた特徴マップのコントラストが高まり、画像の顕著な特徴に焦点が当てられる。
+    GeMは、分類ネットワークでよく使われる平均プーリング($p = 1$)と、空間最大プーリング層($p = \infty$)の一般化である。
 
-ここで$p > 0$はパラメータであり、$p > 1$の場合は、プールされた特徴マップのコントラストが高まり、画像の顕著な特徴に焦点が当てられる。
-GeMは、分類ネットワークでよく使われる平均プーリング($p = 1$)と、空間最大プーリング層($p = \infty$)の一般化である。
+    >[!NOTE]
+    > 大事なのは、
+    > 1. **学習可能なpooling層**であること
+    > 2. pの値を調節することで、**平均プーリングと最大プーリングの中間的な動作を実現できること**
+    >
+    > だと思われる。
 
->[!NOTE]
-> 大事なのは、
-> 1. **学習可能なpooling層**であること
-> 2. pの値を調節することで、**平均プーリングと最大プーリングの中間的な動作を実現できること**
->
-> だと思われる。
+    <details>
+    <summary>実装</summary>
 
-<details>
-<summary>実装</summary>
+    ```python
+    from torch.nn.parameter import Parameter
 
-```python
-from torch.nn.parameter import Parameter
-
-def gem(x, p=3, eps=1e-6):
-    '''
-    Params:
-        x: input tensor
-        p: power parameter
-        eps: epsilon to avoid division by zero
-    '''
-    # xの最小値をepsでclipしたものに対してp乗を計算
-    # そのテンソルを平均プーリングして、p乗根を取る
-    return F.avg_pool1d(x.clamp(min=eps).pow(p), (x.size(-1))).pow(1./p)
-
-class GeM(nn.Module):
-    def __init__(self, p=3, eps=1e-6):
-        super(GeM,self).__init__()
-        # Parameterは学習可能なパラメータを定義するためのクラス
-        # torch.ones(1)は1x1のテンソルを作成し、pで初期化する -> self.p = [p]となっている
-        self.p = Parameter(torch.ones(1)*p)
-        self.eps = eps
-
-    def forward(self, x):
-        return gem(x, p=self.p, eps=self.eps)
-```
-
-</details>
-</details>
-
-<details>
-<summary>Scaled Dot-Product Attention</summary>
-
-[zenn](https://zenn.dev/yuto_mo/articles/72c07b702c50df)を見よう。
-
-数式は以下の通り
-
-$$
-\begin{align*}
-\mathrm{Output}(Q, K, V) &= \mathrm{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V \\
-\end{align*}
-$$
-
-ここで、$Q$はクエリ、$K$はキー、$V$はバリューを表す行列であり、$d_k$はキーの次元数を表すスカラー値である。
-$QK^T$は、クエリとキーの内積を計算することで、$Q$行列のベクトルと$K$行列のベクトルの類似度を測定する。
-
-その後、次元が大きいほど値が大きくなるのを防ぐために、$\sqrt{d_k}$で割ってスケーリングを行う。
-
-さらに、未来の情報を参照しないようにするために、マスクをかけて、softmax関数を適用して、確率分布に変換する。
-最後に、得られた重みをバリュー行列$V$に掛け算して、出力を得る。
-この時、$Q$行列のベクトルと$K$行列のベクトルの類似度が高いほど、$V$の重みを強く反映させることができる。
-
-<details>
-<summary>実装</summary>
-
-```python
-class ScaledDotProductAttention(nn.Module):
-    ''' Scaled Dot-Product Attention '''
-
-    def __init__(self, temperature, attn_dropout=0.1):
-        super().__init__()
-        self.temperature = temperature
-        self.dropout = nn.Dropout(attn_dropout)
-
-    def forward(self, q, k, v, mask=None, attn_mask=None):
+    def gem(x, p=3, eps=1e-6):
         '''
         Params:
-            q: query
-            k: key
-            v: value
-            mask: mask for padding
-            attn_mask: mask for attention
+            x: input tensor
+            p: power parameter
+            eps: epsilon to avoid division by zero
         '''
-        # Q·K^Tを計算
-        attn = torch.matmul(q, k.transpose(2, 3))/ self.temperature
+        # xの最小値をepsでclipしたものに対してp乗を計算
+        # そのテンソルを平均プーリングして、p乗根を取る
+        return F.avg_pool1d(x.clamp(min=eps).pow(p), (x.size(-1))).pow(1./p)
 
-        # maskが指定されている場合、maskを加算する (配列長の違いを考慮するためだと思われる)
-        if mask is not None:
-            attn = attn + mask # this is actually the bias
+    class GeM(nn.Module):
+        def __init__(self, p=3, eps=1e-6):
+            super(GeM,self).__init__()
+            # Parameterは学習可能なパラメータを定義するためのクラス
+            # torch.ones(1)は1x1のテンソルを作成し、pで初期化する -> self.p = [p]となっている
+            self.p = Parameter(torch.ones(1)*p)
+            self.eps = eps
 
-        # attn_maskが指定されている場合、attn_maskを加算する (未来の情報を参照しないようにするため)
-        if attn_mask is not None:
-            attn = attn.float().masked_fill(attn_mask == -1, float('-1e-9'))
+        def forward(self, x):
+            return gem(x, p=self.p, eps=self.eps)
+    ```
 
-        # softmaxを適用して、確率分布に変換する
-        # さらにdropoutを適用して、過学習を防ぐ
-        attn = self.dropout(F.softmax(attn, dim=-1))
+    </details>
 
-        # Q·K^Tの重みをVに掛け算して、出力を得る
-        output = torch.matmul(attn, v)
+3. Scaled Dot-Product Attention
 
-        return output, attn
-```
-</details>
-</details>
+    [zenn](https://zenn.dev/yuto_mo/articles/72c07b702c50df)を見よう。 \
+    数式は以下の通り
 
-<details>
-<summary>Multi-Head Attention</summary>
+    $$
+    \begin{align*}
+    \mathrm{Output}(Q, K, V) &= \mathrm{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V \\
+    \end{align*}
+    $$
 
-[zenn](https://zenn.dev/yuto_mo/articles/cf83d90e8dd9d4)を見よう。
+    ここで、$Q$はクエリ、$K$はキー、$V$はバリューを表す行列であり、$d_k$はキーの次元数を表すスカラー値である。
+    $QK^T$は、クエリとキーの内積を計算することで、$Q$行列のベクトルと$K$行列のベクトルの類似度を測定する。
 
-Scaled Dot-Product Attentionは、重みなどのパラメータを含む層が存在しないため、単純な特徴ベクトルの類似度を計算していたに過ぎない。
-そこで、Scaled Dot-Product Attentionの前に学習可能なパラメータを持つ線形層を追加することで、入力されるベクトルの特徴空間に依存しない表現力を獲得できる。
-これをSingle-Head Attentionと呼ぶ。
+    その後、次元が大きいほど値が大きくなるのを防ぐために、$\sqrt{d_k}$で割ってスケーリングを行う。
 
-> [!CAUTION]
-> ここよくわからん \
-> 「入力されるベクトルの特徴空間に依存しない表現力を獲得できる」とは？ \
-> そこに依存してはいけない理由は？
+    さらに、未来の情報を参照しないようにするために、マスクをかけて、softmax関数を適用して、確率分布に変換する。
+    最後に、得られた重みをバリュー行列$V$に掛け算して、出力を得る。
+    この時、$Q$行列のベクトルと$K$行列のベクトルの類似度が高いほど、$V$の重みを強く反映させることができる。
 
-しかし、実際の言語には複数の意味を持つ単語が存在し、Single-Head Attentionでは、それらの意味を平均化してしまうため、情報が失われてしまう。
+    <details>
+    <summary>実装</summary>
 
-そこで、Single-Head Attentionを複数並列に配置し、それぞれが異なる特徴空間を学習するようにすることで、情報の損失を防ぐことができる。
-これをMulti-Head Attentionと呼ぶ。
+    ```python
+    class ScaledDotProductAttention(nn.Module):
+        ''' Scaled Dot-Product Attention '''
 
-> [!IMPORTANT]
-> 確かに言語だと意味が異なる単語が存在するが、RNAの構造においてはどうなのか？ \
-> 同じ塩基でもcontextによって異なる構造を持つことがそれに当たる？
+        def __init__(self, temperature, attn_dropout=0.1):
+            super().__init__()
+            self.temperature = temperature
+            self.dropout = nn.Dropout(attn_dropout)
 
-<details>
-<summary>実装</summary>
+        def forward(self, q, k, v, mask=None, attn_mask=None):
+            '''
+            Params:
+                q: query
+                k: key
+                v: value
+                mask: mask for padding
+                attn_mask: mask for attention
+            '''
+            # Q·K^Tを計算
+            attn = torch.matmul(q, k.transpose(2, 3))/ self.temperature
 
-```python
-class MultiHeadAttention(nn.Module):
-    ''' Multi-Head Attention module '''
+            # maskが指定されている場合、maskを加算する (配列長の違いを考慮するためだと思われる)
+            if mask is not None:
+                attn = attn + mask # this is actually the bias
 
-    def __init__(self, d_model, n_head, d_k, d_v, dropout=0.1):
-        '''
-        Params:
-            d_model: model dimension (隠れ層の次元数)
-            n_head: number of heads
-            d_k: dimension of key
-            d_v: dimension of value
-            dropout: dropout rate
-        '''
+            # attn_maskが指定されている場合、attn_maskを加算する (未来の情報を参照しないようにするため)
+            if attn_mask is not None:
+                attn = attn.float().masked_fill(attn_mask == -1, float('-1e-9'))
 
-        super().__init__()
+            # softmaxを適用して、確率分布に変換する
+            # さらにdropoutを適用して、過学習を防ぐ
+            attn = self.dropout(F.softmax(attn, dim=-1))
 
-        self.n_head = n_head
-        self.d_k = d_k
-        self.d_v = d_v
+            # Q·K^Tの重みをVに掛け算して、出力を得る
+            output = torch.matmul(attn, v)
 
-        # 線形層の定義
-        # d_model次元の入力をn_head * d_k次元に変換する
-        self.w_qs = nn.Linear(d_model, n_head * d_k, bias=False)
-        self.w_ks = nn.Linear(d_model, n_head * d_k, bias=False)
-        self.w_vs = nn.Linear(d_model, n_head * d_v, bias=False)
-
-        # 複数のヘッドを結合するための線形層
-        self.fc = nn.Linear(n_head * d_v, d_model, bias=False)
-
-        # temperature = sqrt(d_k)でスケーリングする
-        self.attention = ScaledDotProductAttention(temperature=d_k ** 0.5)
-
-        self.dropout = nn.Dropout(dropout)
-        self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)
+            return output, attn
+    ```
+    </details>
 
 
-    def forward(self, q, k, v, mask=None,src_mask=None):
-        '''
-        params:
-            q: query [batch_size, len_q, d_model]
-            k: key
-            v: value
-            mask: mask for padding
-            src_mask: mask for attention [batch_size, len_seq]
-        '''
+4. Multi-Head Attention
 
-        d_k, d_v, n_head = self.d_k, self.d_v, self.n_head
-        sz_b, len_q, len_k, len_v = q.size(0), q.size(1), k.size(1), v.size(1)
+    [zenn](https://zenn.dev/yuto_mo/articles/cf83d90e8dd9d4)を見よう。 \
+    Scaled Dot-Product Attentionは、重みなどのパラメータを含む層が存在しないため、単純な特徴ベクトルの類似度を計算していたに過ぎない。
+    そこで、Scaled Dot-Product Attentionの前に学習可能なパラメータを持つ線形層を追加することで、入力されるベクトルの特徴空間に依存しない表現力を獲得できる。
+    これをSingle-Head Attentionと呼ぶ。
 
-        residual = q
+    > [!CAUTION]
+    > ここよくわからん \
+    > 「入力されるベクトルの特徴空間に依存しない表現力を獲得できる」とは？ \
+    > そこに依存してはいけない理由は？
+
+    しかし、実際の言語には複数の意味を持つ単語が存在し、Single-Head Attentionでは、それらの意味を平均化してしまうため、情報が失われてしまう。
+
+    そこで、Single-Head Attentionを複数並列に配置し、それぞれが異なる特徴空間を学習するようにすることで、情報の損失を防ぐことができる。
+    これをMulti-Head Attentionと呼ぶ。
+
+    > [!IMPORTANT]
+    > 確かに言語だと意味が異なる単語が存在するが、RNAの構造においてはどうなのか？ \
+    > 同じ塩基でもcontextによって異なる構造を持つことがそれに当たる？
+
+    <details>
+    <summary>実装</summary>
+
+    ```python
+    class MultiHeadAttention(nn.Module):
+        ''' Multi-Head Attention module '''
+
+        def __init__(self, d_model, n_head, d_k, d_v, dropout=0.1):
+            '''
+            Params:
+                d_model: model dimension (隠れ層の次元数)
+                n_head: number of heads
+                d_k: dimension of key
+                d_v: dimension of value
+                dropout: dropout rate
+            '''
+
+            super().__init__()
+
+            self.n_head = n_head
+            self.d_k = d_k
+            self.d_v = d_v
+
+            # 線形層の定義
+            # d_model次元の入力をn_head * d_k次元に変換する
+            self.w_qs = nn.Linear(d_model, n_head * d_k, bias=False)
+            self.w_ks = nn.Linear(d_model, n_head * d_k, bias=False)
+            self.w_vs = nn.Linear(d_model, n_head * d_v, bias=False)
+
+            # 複数のヘッドを結合するための線形層
+            self.fc = nn.Linear(n_head * d_v, d_model, bias=False)
+
+            # temperature = sqrt(d_k)でスケーリングする
+            self.attention = ScaledDotProductAttention(temperature=d_k ** 0.5)
+
+            self.dropout = nn.Dropout(dropout)
+            self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)
 
 
-        # self.w_qs(q)                   : [batch_size, len_q, n_head * d_k]
-        #   線形層に通して、n_head * d_k次元に変換
-        # .view(sz_b, len_q, n_head, d_k): [batch_size, len_q, n_head, d_k]
-        q = self.w_qs(q).view(sz_b, len_q, n_head, d_k)
-        k = self.w_ks(k).view(sz_b, len_k, n_head, d_k)
-        v = self.w_vs(v).view(sz_b, len_v, n_head, d_v)
+        def forward(self, q, k, v, mask=None,src_mask=None):
+            '''
+            params:
+                q: query [batch_size, len_q, d_model]
+                k: key
+                v: value
+                mask: mask for padding
+                src_mask: mask for attention [batch_size, len_seq]
+            '''
 
-        # 1次元目と2次元目を入れ替える
-        # [batch_size, len_q, n_head, d_k] -> [batch_size, n_head, len_q, d_k]
-        # headの次元が前に来ると、(len_q, d_k)の行列をn_head個持つことになるので、並列の計算が実装しやすい
-        q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
+            d_k, d_v, n_head = self.d_k, self.d_v, self.n_head
+            sz_b, len_q, len_k, len_v = q.size(0), q.size(1), k.size(1), v.size(1)
 
-        if src_mask is not None:
-            src_mask[src_mask==0] = -1
-            # [batch_size, len_seq] -> [batch_size, len_seq, 1]
-            src_mask=src_mask.unsqueeze(-1).float()
-            # permute: [batch_size, len_seq] -> [batch_size, 1, len_seq]
-            # matumul: [batch_size, len_seq, 1] x [batch_size, 1, len_seq] -> [batch_size, len_seq, len_seq]
-            # unsqueeze: [batch_size, len_seq, len_seq] -> [batch_size, 1, len_seq, len_seq]
-            attn_mask=torch.matmul(src_mask,src_mask.permute(0,2,1)).unsqueeze(1)
-            q, attn = self.attention(q, k, v, mask=mask, attn_mask=attn_mask)
-        else:
-            q, attn = self.attention(q, k, v, mask=mask)
+            residual = q
 
-        # q: [batch_size, n_head, len_q, d_v]
-        # transpose: [batch_size, n_head, len_q, d_v] -> [batch_size, len_q, n_head, d_v]
-        # contiguous: メモリ上で連続したテンソルを作成する (viewに必要)
-        # view: [batch_size, len_q, n_head, d_v] -> [batch_size, len_q, n_head * d_v]
-        q = q.transpose(1, 2).contiguous().view(sz_b, len_q, -1)
 
-        # 線形層に通して、n_head * d_v次元をd_model次元に変換する
-        # dropoutを適用して、過学習を防ぐ
-        q = self.dropout(self.fc(q))
-        # 元のqを加算する (Residual Connection: 残差接続)
-        q += residual
+            # self.w_qs(q)                   : [batch_size, len_q, n_head * d_k]
+            #   線形層に通して、n_head * d_k次元に変換
+            # .view(sz_b, len_q, n_head, d_k): [batch_size, len_q, n_head, d_k]
+            q = self.w_qs(q).view(sz_b, len_q, n_head, d_k)
+            k = self.w_ks(k).view(sz_b, len_k, n_head, d_k)
+            v = self.w_vs(v).view(sz_b, len_v, n_head, d_v)
 
-        # 次元ごとに平均0, 分散1に正規化する
-        q = self.layer_norm(q)
+            # 1次元目と2次元目を入れ替える
+            # [batch_size, len_q, n_head, d_k] -> [batch_size, n_head, len_q, d_k]
+            # headの次元が前に来ると、(len_q, d_k)の行列をn_head個持つことになるので、並列の計算が実装しやすい
+            q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
 
-        return q, attn
-```
-</details>
-</details>
+            if src_mask is not None:
+                src_mask[src_mask==0] = -1
+                # [batch_size, len_seq] -> [batch_size, len_seq, 1]
+                src_mask=src_mask.unsqueeze(-1).float()
+                # permute: [batch_size, len_seq] -> [batch_size, 1, len_seq]
+                # matumul: [batch_size, len_seq, 1] x [batch_size, 1, len_seq] -> [batch_size, len_seq, len_seq]
+                # unsqueeze: [batch_size, len_seq, len_seq] -> [batch_size, 1, len_seq, len_seq]
+                attn_mask=torch.matmul(src_mask,src_mask.permute(0,2,1)).unsqueeze(1)
+                q, attn = self.attention(q, k, v, mask=mask, attn_mask=attn_mask)
+            else:
+                q, attn = self.attention(q, k, v, mask=mask)
+
+            # q: [batch_size, n_head, len_q, d_v]
+            # transpose: [batch_size, n_head, len_q, d_v] -> [batch_size, len_q, n_head, d_v]
+            # contiguous: メモリ上で連続したテンソルを作成する (viewに必要)
+            # view: [batch_size, len_q, n_head, d_v] -> [batch_size, len_q, n_head * d_v]
+            q = q.transpose(1, 2).contiguous().view(sz_b, len_q, -1)
+
+            # 線形層に通して、n_head * d_v次元をd_model次元に変換する
+            # dropoutを適用して、過学習を防ぐ
+            q = self.dropout(self.fc(q))
+            # 元のqを加算する (Residual Connection: 残差接続)
+            q += residual
+
+            # 次元ごとに平均0, 分散1に正規化する
+            q = self.layer_norm(q)
+
+            return q, attn
+    ```
+    </details>
