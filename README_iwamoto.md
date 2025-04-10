@@ -464,6 +464,7 @@ torch.save(model.state_dict(),'RibonanzaNet-3D-final.pt')
     これをSingle-Head Attentionと呼ぶ。
 
     > [!CAUTION]
+    >
     > ここよくわからん \
     > 「入力されるベクトルの特徴空間に依存しない表現力を獲得できる」とは？ \
     > そこに依存してはいけない理由は？
@@ -474,6 +475,7 @@ torch.save(model.state_dict(),'RibonanzaNet-3D-final.pt')
     これをMulti-Head Attentionと呼ぶ。
 
     > [!IMPORTANT]
+    >
     > 確かに言語だと意味が異なる単語が存在するが、RNAの構造においてはどうなのか？ \
     > 同じ塩基でもcontextによって異なる構造を持つことがそれに当たる？
 
@@ -549,7 +551,7 @@ torch.save(model.state_dict(),'RibonanzaNet-3D-final.pt')
                 # [batch_size, len_seq] -> [batch_size, len_seq, 1]
                 src_mask=src_mask.unsqueeze(-1).float()
                 # permute: [batch_size, len_seq] -> [batch_size, 1, len_seq]
-                # matumul: [batch_size, len_seq, 1] x [batch_size, 1, len_seq] -> [batch_size, len_seq, len_seq]
+                # matmul: [batch_size, len_seq, 1] x [batch_size, 1, len_seq] -> [batch_size, len_seq, len_seq]
                 # unsqueeze: [batch_size, len_seq, len_seq] -> [batch_size, 1, len_seq, len_seq]
                 attn_mask=torch.matmul(src_mask,src_mask.permute(0,2,1)).unsqueeze(1)
                 q, attn = self.attention(q, k, v, mask=mask, attn_mask=attn_mask)
