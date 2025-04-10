@@ -326,12 +326,12 @@ torch.save(model.state_dict(),'RibonanzaNet-3D-final.pt')
     [原著論文](https://arxiv.org/abs/1908.08681v3) \
     式は以下の通り
 
-    $$
+    $`
     \begin{align*}
     f(x) &= x \cdot \tanh(\mathrm{softplus}(x)) \\
     \mathrm{softplus}(x) &= \log(1 + e^x)
     \end{align*}
-    $$
+    `$
 
     > [!NOTE]
     > ChatGPT曰く、「ReLU や Swish のような非線形活性化関数の一種で、滑らかで勾配消失が少なく、高速収束が期待できることから、深層学習でよく使われます。」とのこと。
@@ -358,12 +358,12 @@ torch.save(model.state_dict(),'RibonanzaNet-3D-final.pt')
 
     GeMはテンソルの各チャネルの一般化平均を計算するプーリング手法で、以下の式で表される。
 
-    $$
+    $`
     \mathbf{e} = \left[ \left( \frac{1}{|\Omega|} \sum_{u \in \Omega} x^p_{cu} \right)^\frac{1}{p} \right]_{c = 1, \cdots, C}
-    $$
-
-    ここで$p > 0$はパラメータであり、$p > 1$の場合は、プールされた特徴マップのコントラストが高まり、画像の顕著な特徴に焦点が当てられる。
-    GeMは、分類ネットワークでよく使われる平均プーリング($p = 1$)と、空間最大プーリング層($p = \infty$)の一般化である。
+    `$
+   
+    ここで$`p > 0`$はパラメータであり、$`p > 1`$の場合は、プールされた特徴マップのコントラストが高まり、画像の顕著な特徴に焦点が当てられる。
+    GeMは、分類ネットワークでよく使われる平均プーリング($`p = 1`$)と、空間最大プーリング層($`p = \infty`$)の一般化である。
 
     >[!NOTE]
     > 大事なのは、
@@ -403,25 +403,25 @@ torch.save(model.state_dict(),'RibonanzaNet-3D-final.pt')
 
     </details>
 
-3. Scaled Dot-Product Attention
+4. Scaled Dot-Product Attention
 
     [zenn](https://zenn.dev/yuto_mo/articles/72c07b702c50df)を見よう。 \
     数式は以下の通り
 
-    $$
+    $`
     \begin{align*}
     \mathrm{Output}(Q, K, V) &= \mathrm{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V \\
     \end{align*}
-    $$
+    `$
 
-    ここで、$Q$はクエリ、$K$はキー、$V$はバリューを表す行列であり、$d_k$はキーの次元数を表すスカラー値である。
-    $QK^T$は、クエリとキーの内積を計算することで、$Q$行列のベクトルと$K$行列のベクトルの類似度を測定する。
+    ここで、 $`Q`$はクエリ、$`K`$はキー、$`V`$はバリューを表す行列であり、$`d_k`$はキーの次元数を表すスカラー値である。
+    $QK^T$は、クエリとキーの内積を計算することで、$`Q`$行列のベクトルと$`K`$行列のベクトルの類似度を測定する。
 
-    その後、次元が大きいほど値が大きくなるのを防ぐために、$\sqrt{d_k}$で割ってスケーリングを行う。
+    その後、次元が大きいほど値が大きくなるのを防ぐために、$`\sqrt{d_k}`$で割ってスケーリングを行う。
 
     さらに、未来の情報を参照しないようにするために、マスクをかけて、softmax関数を適用して、確率分布に変換する。
-    最後に、得られた重みをバリュー行列$V$に掛け算して、出力を得る。
-    この時、$Q$行列のベクトルと$K$行列のベクトルの類似度が高いほど、$V$の重みを強く反映させることができる。
+    最後に、得られた重みをバリュー行列$`V`$に掛け算して、出力を得る。
+    この時、$`Q`$行列のベクトルと$`K`$行列のベクトルの類似度が高いほど、$`V`$の重みを強く反映させることができる。
 
     <details>
     <summary>実装</summary>
@@ -467,7 +467,7 @@ torch.save(model.state_dict(),'RibonanzaNet-3D-final.pt')
     </details>
 
 
-4. Multi-Head Attention
+5. Multi-Head Attention
 
     [zenn](https://zenn.dev/yuto_mo/articles/cf83d90e8dd9d4)を見よう。 \
     Scaled Dot-Product Attentionは、重みなどのパラメータを含む層が存在しないため、単純な特徴ベクトルの類似度を計算していたに過ぎない。
