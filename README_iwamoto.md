@@ -576,3 +576,138 @@ torch.save(model.state_dict(),'RibonanzaNet-3D-final.pt')
             return q, attn
     ```
     </details>
+
+## 2025/04/10, 11
+
+### [RibonanzaNet 実装](https://github.com/Shujun-He/RibonanzaNet)を読む (続き)
+
+#### `Network.py` (続き)
+
+5. ConvTransformerEncoder Class
+
+    Transformer + 畳み込み + Triangle Attention + Pairwise Featureを組み合わせたencode層である。
+
+    Triangle Attentionとは、pairwise featureに対して、3つの異なる塩基の三角形的な関係を考慮したattention機構である。
+    ![](./figures/triangle_attention.png)
+
+    <details>
+    <summary>実装</summary>
+
+    ```python
+    class ConvTransformerEncoderLayer(nn.Module):
+
+        def __init__(self, d_model, nhead, dim_feedforward, pairwise_dimension, use_triangular_attention, dropout=0.1, k=3):
+
+            super(ConvTransformerEncoderLayer, self).__init__()
+
+            # multi-head attentionの定義
+            self.self_attn = MultiHeadAttention(d_model, nhead, d_model//nhead, d_model//nhead, dropout=dropout)
+
+            # feed forwardの入力層->隠れ層
+            self.linear1 = nn.Linear(d_model, dim_feedforward)
+            # feed forwardの隠れ層の活性化関数後のdropout
+            self.dropout = nn.Dropout(dropout)
+            # feed forwardの隠れ層->出力層
+            self.linear2 = nn.Linear(dim_feedforward, d_model)
+
+            # 畳み込み後 + multi-head attentionの正規化
+            self.norm1 = nn.LayerNorm(d_model)
+            # feed forwardの残差接続後の正規化
+            self.norm2 = nn.LayerNorm(d_model)
+            # 畳み込み層の正規化
+            self.norm3 = nn.LayerNorm(d_model)
+
+            # multi-head attentionの計算結果のdropout
+            self.dropout1 = nn.Dropout(dropout)
+            # feed forwardの計算結果のdropout
+            self.dropout2 = nn.Dropout(dropout)
+
+            # multi-head attentionにpairwise representationを加えるための線形層
+            self.pairwise2heads = nn.Linear(pairwise_dimension,nhead,bias=False)
+            self.pairwise_norm = nn.LayerNorm(pairwise_dimension)
+            self.activation = nn.GELU()
+
+            # sequenceの畳み込み
+            self.conv = nn.Conv1d(d_model, d_model,k, padding=k//2)
+
+            self.triangle_update_out = TriangleMultiplicativeModule(dim=pairwise_dimension,mix='outgoing')
+            self.triangle_update_in = TriangleMultiplicativeModule(dim=pairwise_dimension,mix='ingoing')
+
+            self.pair_dropout_out = DropoutRowwise(dropout)
+            self.pair_dropout_in = DropoutRowwise(dropout)
+
+            self.use_triangular_attention = use_triangular_attention
+            if self.use_triangular_attention:
+                self.triangle_attention_out = TriangleAttention(in_dim=pairwise_dimension,
+                                                                        dim=pairwise_dimension//4,
+                                                                        wise='row')
+                self.triangle_attention_in = TriangleAttention(in_dim=pairwise_dimension,
+                                                                        dim=pairwise_dimension//4,
+                                                                        wise='col')
+
+                self.pair_attention_dropout_out = DropoutRowwise(dropout)
+                self.pair_attention_dropout_in = DropoutColumnwise(dropout)
+
+            # pairwise_featuresに加算するsequence representationsのouter_product_meanを計算する層
+            self.outer_product_mean = Outer_Product_Mean(in_dim=d_model, pairwise_dim=pairwise_dimension)
+
+            self.pair_transition = nn.Sequential(
+                                            nn.LayerNorm(pairwise_dimension),
+                                            nn.Linear(pairwise_dimension,pairwise_dimension*4),
+                                            nn.ReLU(inplace=True),
+                                            nn.Linear(pairwise_dimension*4,pairwise_dimension))
+
+
+        def forward(self, src , pairwise_features, src_mask=None, return_aw=False):
+            '''
+            Params:
+                src: input sequence [batch_size, len_seq, d_model]
+                pairwise_features: pairwise features [batch_size, len_seq, len_seq, pairwise_dimension]
+                src_mask: mask for padding
+                return_aw: return attention weights
+            '''
+
+            # src_maskを適用する
+            src = src * src_mask.float().unsqueeze(-1)
+
+            # 畳み込みを適用する
+            # len_seqの次元を畳み込みたいので、一度[batch_size, d_model, len_seq]に変換して戻している
+            src = src + self.conv(src.permute(0,2,1)).permute(0,2,1)
+            # srcを正規化する
+            src = self.norm3(src)
+
+            # pairwise_featuresを正規化したものをpairwise_biasに変換する
+            # pairwise_bias: [batch_size, n_head, len_seq, len_seq]
+            pairwise_bias=self.pairwise2heads(self.pairwise_norm(pairwise_features)).permute(0,3,1,2)
+
+            # multi-head attentionを適用する
+            src2, attention_weights = self.self_attn(src, src, src, mask=pairwise_bias, src_mask=src_mask)
+
+            # multi-head attentionの結果を元のsrcに加算する (Residual Connection: 残差接続)
+            src = src + self.dropout1(src2)
+            # srcを正規化する
+            src = self.norm1(src)
+            # feed forwardの計算
+            # 線形層 -> 活性化関数 -> dropout -> 線形層
+            src2 = self.linear2(self.dropout(self.activation(self.linear1(src))))
+            # 元のsrcに加算する (Residual Connection: 残差接続)
+            src = src + self.dropout2(src2)
+            # srcを正規化する
+            src = self.norm2(src)
+
+            # pairwise_featuresに加算するsequence representationsのouter_product_meanを計算
+            pairwise_features = pairwise_features + self.outer_product_mean(src)
+
+            pairwise_features = pairwise_features + self.pair_dropout_out(self.triangle_update_out(pairwise_features, src_mask))
+            pairwise_features = pairwise_features + self.pair_dropout_in(self.triangle_update_in(pairwise_features, src_mask))
+            if self.use_triangular_attention:
+                pairwise_features = pairwise_features + self.pair_attention_dropout_out(self.triangle_attention_out(pairwise_features,src_mask))
+                pairwise_features = pairwise_features + self.pair_attention_dropout_in(self.triangle_attention_in(pairwise_features,src_mask))
+            pairwise_features = pairwise_features + self.pair_transition(pairwise_features)
+            if return_aw:
+                return src, pairwise_features, attention_weights
+            else:
+                return src, pairwise_features
+    ```
+
+    </details>
