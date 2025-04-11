@@ -597,6 +597,16 @@ torch.save(model.state_dict(),'RibonanzaNet-3D-final.pt')
     class ConvTransformerEncoderLayer(nn.Module):
 
         def __init__(self, d_model, nhead, dim_feedforward, pairwise_dimension, use_triangular_attention, dropout=0.1, k=3):
+            '''
+            Params:
+                d_model: model dimension
+                nhead: number of heads
+                dim_feedforward: feed forwardの隠れ層の次元数
+                pairwise_dimension: pairwise featureの次元数
+                use_triangular_attention: boolean
+                dropout: dropout rate
+                k: 畳み込みのカーネルサイズ
+            '''
 
             super(ConvTransformerEncoderLayer, self).__init__()
 
@@ -628,29 +638,35 @@ torch.save(model.state_dict(),'RibonanzaNet-3D-final.pt')
             self.activation = nn.GELU()
 
             # sequenceの畳み込み
-            self.conv = nn.Conv1d(d_model, d_model,k, padding=k//2)
+            self.conv = nn.Conv1d(d_model, d_model, k, padding=k//2)
 
+            # outgoingとingoingの Triangular multiplicative updateを計算する層
             self.triangle_update_out = TriangleMultiplicativeModule(dim=pairwise_dimension,mix='outgoing')
             self.triangle_update_in = TriangleMultiplicativeModule(dim=pairwise_dimension,mix='ingoing')
 
+            # triangular multiplicative updateのdropout
             self.pair_dropout_out = DropoutRowwise(dropout)
             self.pair_dropout_in = DropoutRowwise(dropout)
 
             self.use_triangular_attention = use_triangular_attention
             if self.use_triangular_attention:
+                # outgoingの triangle attentionを計算する層
                 self.triangle_attention_out = TriangleAttention(in_dim=pairwise_dimension,
                                                                         dim=pairwise_dimension//4,
                                                                         wise='row')
+                # incomingの triangle attentionを計算する層
                 self.triangle_attention_in = TriangleAttention(in_dim=pairwise_dimension,
                                                                         dim=pairwise_dimension//4,
                                                                         wise='col')
 
+                # triangular attentionのdropout
                 self.pair_attention_dropout_out = DropoutRowwise(dropout)
                 self.pair_attention_dropout_in = DropoutColumnwise(dropout)
 
             # pairwise_featuresに加算するsequence representationsのouter_product_meanを計算する層
             self.outer_product_mean = Outer_Product_Mean(in_dim=d_model, pairwise_dim=pairwise_dimension)
 
+            # transitionを適用する層
             self.pair_transition = nn.Sequential(
                                             nn.LayerNorm(pairwise_dimension),
                                             nn.Linear(pairwise_dimension,pairwise_dimension*4),
@@ -697,13 +713,19 @@ torch.save(model.state_dict(),'RibonanzaNet-3D-final.pt')
 
             # pairwise_featuresに加算するsequence representationsのouter_product_meanを計算
             pairwise_features = pairwise_features + self.outer_product_mean(src)
-
+            # outgoing, incomingの triangular multiplicative updateを計算する
             pairwise_features = pairwise_features + self.pair_dropout_out(self.triangle_update_out(pairwise_features, src_mask))
             pairwise_features = pairwise_features + self.pair_dropout_in(self.triangle_update_in(pairwise_features, src_mask))
+
+
             if self.use_triangular_attention:
+                # outgoingの triangle attentionを計算する
                 pairwise_features = pairwise_features + self.pair_attention_dropout_out(self.triangle_attention_out(pairwise_features,src_mask))
                 pairwise_features = pairwise_features + self.pair_attention_dropout_in(self.triangle_attention_in(pairwise_features,src_mask))
+
+            # transitionを適用する
             pairwise_features = pairwise_features + self.pair_transition(pairwise_features)
+
             if return_aw:
                 return src, pairwise_features, attention_weights
             else:
