@@ -323,6 +323,7 @@ torch.save(model.state_dict(),'RibonanzaNet-3D-final.pt')
 #### `Network.py`
 
 1. 活性化関数 Mish
+
     [原著論文](https://arxiv.org/abs/1908.08681v3) \
     式は以下の通り
 
@@ -335,6 +336,8 @@ torch.save(model.state_dict(),'RibonanzaNet-3D-final.pt')
     <summary>実装</summary>
 
     ```python
+    import torch.nn.functional as F
+
     class Mish(nn.Module):
         def __init__(self):
             super().__init__()
@@ -369,6 +372,7 @@ torch.save(model.state_dict(),'RibonanzaNet-3D-final.pt')
     <summary>実装</summary>
 
     ```python
+    import torch.nn.functional as F
     from torch.nn.parameter import Parameter
 
     def gem(x, p=3, eps=1e-6):
@@ -416,6 +420,8 @@ torch.save(model.state_dict(),'RibonanzaNet-3D-final.pt')
     <summary>実装</summary>
 
     ```python
+    import torch.nn.functional as F
+
     class ScaledDotProductAttention(nn.Module):
         ''' Scaled Dot-Product Attention '''
 
@@ -533,9 +539,9 @@ torch.save(model.state_dict(),'RibonanzaNet-3D-final.pt')
 
             residual = q
 
-
+            # 線形層に通して、n_head * d_k次元に変換
+            # original                       : [batch_size, len_q, d_model]
             # self.w_qs(q)                   : [batch_size, len_q, n_head * d_k]
-            #   線形層に通して、n_head * d_k次元に変換
             # .view(sz_b, len_q, n_head, d_k): [batch_size, len_q, n_head, d_k]
             q = self.w_qs(q).view(sz_b, len_q, n_head, d_k)
             k = self.w_ks(k).view(sz_b, len_k, n_head, d_k)
