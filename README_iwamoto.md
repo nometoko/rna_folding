@@ -409,6 +409,7 @@ torch.save(model.state_dict(),'RibonanzaNet-3D-final.pt')
 
     ここで、 $`Q`$はクエリ、$`K`$はキー、$`V`$はバリューを表す行列であり、$`d_k`$はキーの次元数を表すスカラー値である。
     $QK^T$は、クエリとキーの内積を計算することで、$`Q`$行列のベクトルと$`K`$行列のベクトルの類似度を測定する。
+    考え方としてはコサイン類似度に近い。
 
     その後、次元が大きいほど値が大きくなるのを防ぐために、$`\sqrt{d_k}`$で割ってスケーリングを行う。
 
@@ -442,7 +443,7 @@ torch.save(model.state_dict(),'RibonanzaNet-3D-final.pt')
             # Q·K^Tを計算
             attn = torch.matmul(q, k.transpose(2, 3))/ self.temperature
 
-            # maskが指定されている場合、maskを加算する (配列長の違いを考慮するためだと思われる)
+            # maskが指定されている場合、maskを加算する (pairwise feature biasの加算)
             if mask is not None:
                 attn = attn + mask # this is actually the bias
 
@@ -484,6 +485,7 @@ torch.save(model.state_dict(),'RibonanzaNet-3D-final.pt')
     >
     > 確かに言語だと意味が異なる単語が存在するが、RNAの構造においてはどうなのか？ \
     > 同じ塩基でもcontextによって異なる構造を持つことがそれに当たる？
+    > 構造の多様性を考慮するなら、並列の数が多いほうがいい？
 
     <details>
     <summary>実装</summary>
@@ -556,7 +558,7 @@ torch.save(model.state_dict(),'RibonanzaNet-3D-final.pt')
                 src_mask[src_mask==0] = -1
                 # [batch_size, len_seq] -> [batch_size, len_seq, 1]
                 src_mask=src_mask.unsqueeze(-1).float()
-                # permute: [batch_size, len_seq] -> [batch_size, 1, len_seq]
+                # permute: [batch_size, len_seq, 1] -> [batch_size, 1, len_seq]
                 # matmul: [batch_size, len_seq, 1] x [batch_size, 1, len_seq] -> [batch_size, len_seq, len_seq]
                 # unsqueeze: [batch_size, len_seq, len_seq] -> [batch_size, 1, len_seq, len_seq]
                 attn_mask=torch.matmul(src_mask,src_mask.permute(0,2,1)).unsqueeze(1)
