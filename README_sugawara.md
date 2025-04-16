@@ -190,7 +190,82 @@
 
 今日は(いつか)[Ribonanza 上位解法](https://zenn.dev/nishimoto/articles/14da0f491c7632)を読み進めていきたい
 
+### 20250415
+今回コンペのdiscussionを読み進めていく。
+first submitもした！
+- [ホストのwelcome](https://www.kaggle.com/competitions/stanford-rna-3d-folding/discussion/565064)のコメントから知ったこと
+  - `*_sequences.csv`, `*_labels.csv`の違い
+    - `*_sequences.csv` には、RNA構造の折り畳まれていないヌクレオチド配列（A、C、G、U）が含まれる
+    - `*_labels.csv` には、配列中の全てのヌクレオチドのC1'原子のx、y、z座標を提供することで、折り畳まれたRNAの実際の構造が含まれている
+    - つまり、前者はモデルの入力であり、後者は出力、つまり折り畳まれたRNAの構造です。
+  - x1~x5の意味
+    - 5つの異なるモデルによる予測を出力できる。
+    - [このnb](https://www.kaggle.com/code/shujun717/ribonanzanet-3d-inference)では、1~4はtrainモードでDropoutのランダム性を活かしてランダムな4つの結果を出力・5つ目はevalモードで(確率的に変化しない)ガチ推論を行う
+    ```python
+    # モデルを評価モードに設定（DropoutやBatchNormが推論モードに切り替わる）
+    model.eval()
 
+    # 全予測結果を保存するリスト
+    preds = []
+
+    # テストデータセットの各サンプルに対してループ
+    for i in range(len(test_dataset)):
+        # 1つのテストサンプルの 'sequence' を取り出し、long型に変換
+        src = test_dataset[i]['sequence'].long()
+
+        # バッチ次元を追加（モデルの入力が [batch_size, ...] の形式を想定しているため）
+        src = src.unsqueeze(0).cuda()  # GPU に転送
+
+        # 以下では、Dropoutのランダム性を活かした予測を行うため、あえて訓練モードに切り替え
+        model.train()
+
+        # このサンプルに対する複数回の予測結果を保存するリスト
+        tmp = []
+
+        # Dropout の効果を得るため、モデルを train() にした状態で4回予測を行う
+        for i in range(4):
+            with torch.no_grad():  # 勾配を計算しない（推論モード）
+                xyz = model(src).squeeze()  # 出力をバッチ次元除去して取得
+            tmp.append(xyz.cpu().numpy())  # CPU に移して numpy 配列として保存
+
+        # 通常の評価モードに戻して、もう1回予測（安定した出力）
+        model.eval()
+        with torch.no_grad():
+            xyz = model(src).squeeze()
+        tmp.append(xyz.cpu().numpy())
+
+        # 5回分の予測（Dropout有×4 + Dropout無×1）をスタック → shape: (5, ..., ...)
+        tmp = np.stack(tmp, 0)
+
+        # すべての予測を保存
+        preds.append(tmp)
+    ```
+
+- [過去コンペで重要な考え・上位解法のリンクまとめ](https://www.kaggle.com/competitions/stanford-rna-3d-folding/discussion/565292)
+- [AF2までの経緯を説明した動画](https://www.youtube.com/watch?v=P_fHJIYENdI)
+  - AFの入力：タンパク質配列・evolutionary table。co-evolutionが重要
+    - co-evolutionの定義：あるアミノ酸残基が変異したときに、それに対応して別の残基も変異するような関係性。
+      - これは、立体構造内で互いに接触しているようなペアでよく見られる。
+    - MSAの定義：複数の相同性のある配列（＝進化的に関連のある配列）を並べて比較し、どこが保存され、どこが変異しているかを調べる手法。
+      - つまり、MSAが入力、co-evolutionがMSAより導かれる特徴量
+    - Ribonanzaでは「この2つの残基は一緒に変わる ⇒ 近くにあるかも」みたいな組があまりなく、AF的な手法が効かない　ということか。
+  - AFの出力：直接3D構造ではなく、構造の距離を表した2次元ペア行列。
+    - 距離だけでなく、アミノ酸残基がねじれているか
+  - AF2の強み(1) EVO Former
+    ![](figures/2025-04-16-18-02-14.png)
+    - AF1
+      - 左の情報を入力にDNNし、右を出力
+    - AF2
+      - 入力配列から左・右をそれぞれ予測。その後ブリッジして互いに補完。
+      - 例　左から右
+        ![](figures/2025-04-16-18-06-11.png)
+        - アミノ配列の変異が同時に怒っている→構造に重要→右へ補完
+        - triangular attentionがアミノ酸残基同士の距離の情報を与える→pair representationが更新される
+      - 例　右から左
+        - pair representationsで、2つの残基が近すぎる→その組み合わせは行わないように左に伝える
+      - この情報の行き来を48回行う
+  - AF2の強み (2) Stucture Module
+  - [日本語でAF2までの流れ・Structure Moduleなどの詳細が書かれている](https://www.jstage.jst.go.jp/article/jsbibr/3/2/3_jsbibr.2022.3/_html/-char/ja)
 
 ## 読みたい
 - [ ] [Ribonanza 日本人の解法](https://qiita.com/SHIBA_TT/items/e6f4fc974d026fab0ebd)
