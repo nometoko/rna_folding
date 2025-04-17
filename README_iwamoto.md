@@ -741,3 +741,274 @@ torch.save(model.state_dict(),'RibonanzaNet-3D-final.pt')
     ```
 
     </details>
+
+## 2025/04/16
+
+### [RibonanzaNet 実装](https://github.com/Shujun-He/RibonanzaNet)を読む (続き)
+
+#### `Network.py` (続き)
+
+6. Absolute Positional Encoding
+
+    transformerには、再起や畳み込みのような順序を考慮した構造がないため、位置情報を持たせる必要がある。
+    そこで、encoder, decoderの入力に位置情報を加えることで、順序を考慮する。
+    位置情報は、以下の式で計算される。
+    ![](./figures/math_figures/positional_encoding.png)
+
+    <details>
+    <summary>実装</summary>
+
+    ```python
+    class PositionalEncoding(nn.Module):
+        def __init__(self, d_model, dropout=0.1, max_len=200):
+            super(PositionalEncoding, self).__init__()
+            self.dropout = nn.Dropout(p=dropout)
+
+            # pe: (max_len, d_model)のテンソルを作成
+            pe = torch.zeros(max_len, d_model)
+            # position (max_len, 1)のテンソルを作成
+            position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+            # 2i次元の位置情報を計算する
+            # e^{x * -log(10000)/d_model} = (1/10000) ^(x/d_model)
+            div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+            # 2i次元の位置情報を計算する
+            pe[:, 0::2] = torch.sin(position * div_term)
+            # 2i+1次元の位置情報を計算するa
+            pe[:, 1::2] = torch.cos(position * div_term)
+            # peの次元を変更する (max_len, d_model) -> (1, max_len, d_model) -> (max_len, 1, d_model)
+            pe = pe.unsqueeze(0).transpose(0, 1)
+            # peをバッファとして登録して、学習しないようにする
+            self.register_buffer('pe', pe)
+
+        def forward(self, x):
+            # x.size(0)までの位置情報を取得し、加算する
+            x = x + self.pe[:x.size(0), :]
+            return self.dropout(x)
+    ```
+    </details>
+
+7. Outer Product Mean
+
+    sequence representationsをpairwise featuresに加算するための層である。
+
+    以下は[John Jumer _et al._, _Nature_, (2021).](https://www.nature.com/articles/s41586-021-03819-2)より引用([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/))
+    > The MSA representation updates the pair representation through an element-wise outer product that is summed over the MSA sequence dimension. In contrast to previous work30, this operation is applied within every block rather than once in the network, which enables the continuous communication from the evolving MSA representation to the pair representation.
+
+    日本語に訳すと、
+    「MSA表現は、MSAシーケンスの次元にわたって合計される要素ごとの外積を通じてペア表現を更新する。
+    この演算はネットワーク内で一度ではなく、すべてのブロック内で適用されるため、進化するMSA表現からペア表現への継続的な通信が可能になる。」
+    となる。
+
+    要素ごとの外積を計算することで、ある塩基$`i`$と$`j`$の間の相互作用を考慮することができる。
+    繰り返すtransformer encoder blockの中で毎回計算することで、MSA表現からペア表現への継続的な通信が可能になる。
+
+
+    <details>
+    <summary>実装</summary>
+
+    ```python
+    class Outer_Product_Mean(nn.Module):
+        def __init__(self, in_dim=256, dim_msa=32, pairwise_dim=64):
+            '''
+            Params:
+                in_dim: input dimension
+                dim_msa: MSA dimension
+                pairwise_dim: pairwise dimension
+            '''
+            super(Outer_Product_Mean, self).__init__()
+            self.proj_down1 = nn.Linear(in_dim, dim_msa)
+            self.proj_down2 = nn.Linear(dim_msa ** 2, pairwise_dim)
+
+        def forward(self, seq_rep, pair_rep=None):
+            '''
+            Params:
+                seq_rep: sequence representation [batch_size, len_seq, in_dim]
+                pair_rep: pairwise representation [batch_size, len_seq, len_seq, pairwise_dim]
+            '''
+
+            # seq_rep [batch_size, len_seq, in_dim] -> [batch_size, len_seq, dim_msa]
+            seq_rep = self.proj_down1(seq_rep)
+
+            # seq_rep[b, i]のベクトルとseq_rep[b, j]のベクトルの外積 (クロネッカー積)を計算する
+            # [batch_size, len_seq, dim_msa] -> [batch_size, len_seq, len_seq, dim_msa, dim_msa]
+            outer_product = torch.einsum('bid,bjc -> bijcd', seq_rep, seq_rep)
+            # outer_productを[batch_size, len_seq, len_seq, dim_msa * dim_msa]に変換する
+            outer_product = rearrange(outer_product, 'b i j c d -> b i j (c d)')
+            # outer_productを[batch_size, len_seq, len_seq, pairwise_dim]に変換する
+            outer_product = self.proj_down2(outer_product)
+
+            # pair_repが指定されている場合、outer_productを加算する
+            if pair_rep is not None:
+                outer_product = outer_product + pair_rep
+
+            return outer_product
+    ```
+    </details>
+
+8. Relative Positional Encoding
+
+    Relative Positional Encoding(相対位置エンコーディング)は、Transformerモデルにおいて、単語やトークン同士の相対的な位置情報を考慮するための手法である。
+
+    [John Jumer _et al._, _Nature_, (2021).](https://www.nature.com/articles/s41586-021-03819-2)の手法を踏襲している。 ([Supplementary Information](https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-021-03819-2/MediaObjects/41586_2021_3819_MOESM1_ESM.pdf)にアルゴリズムの記述あり)
+
+    以下引用([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/))
+
+    > To provide the network with information about the positions of residues in the chain, we also encode relative positional features (Algorithm 4) into the initial pair representations.
+    > Specifically, for a residue pair $`i, j \in \lbrace 1 \dots N_{res} \rbrace `$ we compute the clipped relative distance within a chain, encode it as a one-hot vector, and add this vector’s linear projection to zij.
+    > Since we are clipping by the maximum value 32, any larger distances within the residue chain will not be distinguished by this feature.
+    > This inductive bias de-emphasizes primary sequence distances. Compared to the more traditional approach of encoding positions in the frequency space [95], this relative encoding scheme empirically allows the network to be evaluated without quality degradation on much longer sequences than it was trained on.
+
+    具体的には、塩基対$`i, j \in \lbrace 1 \dots N_{res} \rbrace `$の相対距離を計算し、one-hotベクトルとしてエンコードし、このベクトルの線形射影を$`z_{ij}`$に加算する。
+    one-hotベクトルは、相対位置を[-32, 32]の範囲にクリップしているため、クリップされた相対距離を計算する。
+    (RibonanzaNetでは、最大値を8にクリップしている。)
+
+    > [!CAUTION]
+    > RibonanzaNetでは1次元配列上の相対位置を取っているだけである。
+    > 3次元構造を予測するうえではそれはどうなのか？
+
+    <details>
+    <summary>実装</summary>
+
+    ```python
+    class relpos(nn.Module):
+        def __init__(self, dim=64):
+            super(relpos, self).__init__()
+            # 17は、-8から8までの整数の数
+            self.linear = nn.Linear(17, dim)
+
+        def forward(self, src):
+            # 配列の長さ
+            L=src.shape[1]
+            # 0からL-1までの整数を生成し、1次元目に追加する
+            # res_id: (1, L)
+            res_id = torch.arange(L).to(src.device).unsqueeze(0)
+            device = res_id.device
+            # -8から8までの整数を生成する
+            bin_values = torch.arange(-8, 9, device=device)
+            # res_id[:, :, None]: (1, L, 1)
+            # res_id[:, None, :]: (1, 1, L)
+            # d: (1, L, L)
+            # d[1, i, j]には、i番目の塩基とj番目の塩基の相対距離が格納される
+            d = res_id[:, :, None] - res_id[:, None, :]
+
+            # 境界値を設定する
+            bdy = torch.tensor(8, device=device)
+            # 設定した境界値を超えた部分をクリップする
+            d = torch.minimum(torch.maximum(-bdy, d), bdy)
+            # dをone-hotベクトルに変換する
+            # bin_valuesに一致する要素が1、それ以外は0になる
+            d_onehot = (d[..., None] == bin_values).float()
+
+            # d_onehotの合計が1になることを確認する
+            assert d_onehot.sum(dim=-1).min() == 1
+            # 線形層にかける
+            p = self.linear(d_onehot)
+            return p
+        ```
+    </details>
+
+9. Triangle Multiplicative Module
+
+    triangle multiplicative updateを計算する層である。
+
+    以下の図は[John Jumer _et al._, _Nature_, (2021).](https://www.nature.com/articles/s41586-021-03819-2)より引用 ([CC BY 4.0](http://creativecommons.org/licenses/by/4.0/.))
+    ![](./figures/triangular_multiplicative_update.png)
+
+    <details>
+    <summary>実装</summary>
+
+    > [!CAUTION]
+    > 以下の実装は、上の図と異なるところがあるので注意 (理由は不明)
+    > - `out_gate`の掛け算を線形層の前に適用している。 \
+    > その場合、次元が合わないはずなのになぜコードが回るのか？
+
+    ```python
+    class TriangleMultiplicativeModule(nn.Module):
+        def __init__(self, *, dim, hidden_dim=None, mix='ingoing'):
+            super().__init__()
+
+            # 入力のcheck
+            assert mix in {'ingoing', 'outgoing'}, 'mix must be either ingoing or outgoing'
+
+            hidden_dim = default(hidden_dim, dim)
+            self.norm = nn.LayerNorm(dim)
+
+            self.left_proj = nn.Linear(dim, hidden_dim)
+            self.right_proj = nn.Linear(dim, hidden_dim)
+
+            self.left_gate = nn.Linear(dim, hidden_dim)
+            self.right_gate = nn.Linear(dim, hidden_dim)
+            self.out_gate = nn.Linear(dim, hidden_dim)
+
+            # すべてのゲートの重みを0に、バイアスを1に初期化する
+            # 初期化ではこの線形層の出力は必ず1になる
+            # sigmoidにかけると、すべて0.7...くらいになる。
+            # 要素ごとの掛け算の段階ですべての要素を等しく0.7倍くらいにして通すgate
+            for gate in (self.left_gate, self.right_gate, self.out_gate):
+                nn.init.constant_(gate.weight, 0.)
+                nn.init.constant_(gate.bias, 1.)
+
+            if mix == 'outgoing':
+                # x: [..., i, k, d]と y: [..., j, k, d]のk次元の内積を計算する
+                # 要するに i->k, j->kのエッジの内積を計算する
+                self.mix_einsum_eq = '... i k d, ... j k d -> ... i j d'
+            elif mix == 'ingoing':
+                # x: [..., k, i, d]と y: [..., k, j, d]のk次元の内積を計算する
+                # 要するに k->i, k->jのエッジの内積を計算する
+                self.mix_einsum_eq = '... k j d, ... k i d -> ... i j d'
+
+            self.to_out_norm = nn.LayerNorm(hidden_dim)
+            self.to_out = nn.Linear(hidden_dim, dim)
+
+        def forward(self, x, src_mask=None):
+            '''
+            Params:
+                x: input [batch_size, len_seq, dim]
+                src_mask: mask for padding [batch_size, len_seq]
+            '''
+
+            # src_mask [batch_size, len_seq] -> [batch_size, len_seq, 1]
+            src_mask = src_mask.unsqueeze(-1).float()
+            # mask: [batch_size, len_seq, 1] * [batch_size, 1, len_seq] -> [batch_size, len_seq, len_seq]
+            mask = torch.matmul(src_mask,src_mask.permute(0,2,1))
+
+            # check if x is square
+            assert x.shape[1] == x.shape[2], 'feature map must be symmetrical'
+
+            if mask is not None:
+                # mask: [batch_size, len_seq, len_seq] -> [batch_size, len_seq, len_seq, 1]
+                mask = rearrange(mask, 'b i j -> b i j ()')
+
+            # xの正規化
+            x = self.norm(x)
+
+            # xをleft_proj, right_projに通す
+            left = self.left_proj(x)
+            right = self.right_proj(x)
+
+            # left, rightにmaskを適用する
+            if mask is not None:
+                left = left * mask
+                right = right * mask
+
+            # xに対して、left_gate, right_gate, out_gateを計算し、sigmoid関数を適用する
+            # left_gate, right_gate, out_gate: [batch_size, len_seq, hidden_dim]
+            left_gate = self.left_gate(x).sigmoid()
+            right_gate = self.right_gate(x).sigmoid()
+            out_gate = self.out_gate(x).sigmoid()
+
+            # left, rightに対して、left_gate, right_gateを掛け算する (要素ごとの掛け算)
+            left = left * left_gate
+            right = right * right_gate
+
+            # outgoing, ingoingのエッジの内積を計算する
+            out = einsum(self.mix_einsum_eq, left, right)
+
+            # 正則化
+            out = self.to_out_norm(out)
+            # out_gateを掛け算する (要素ごとの掛け算)
+            out = out * out_gate
+            # outを線形層に通す
+            return self.to_out(out)
+    ```
+    </details>
