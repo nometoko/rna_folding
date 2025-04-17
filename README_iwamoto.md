@@ -1015,3 +1015,238 @@ torch.save(model.state_dict(),'RibonanzaNet-3D-final.pt')
             return self.to_out(out)
     ```
     </details>
+
+## 2025/04/17
+
+### [RibonanzaNet 実装](https://github.com/Shujun-He/RibonanzaNet)を読む (続き)
+
+#### `Network.py` (続き)
+
+10. RibonanzaNet class
+
+    RibonanzaNetは、ConvTransformerEncoderLayerを複数重ねた構造になっている。
+
+    以下の図は[Shujun He _et al._, _bioRxiv_, (2021).](https://www.biorxiv.org/content/10.1101/2024.02.24.581671v1.article-info)より一部改変 ([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/))
+    ![](./figures/ribonanzaNet.png)
+
+
+    <details>
+    <summary>実装</summary>
+
+    ```python
+    class RibonanzaNet(nn.Module):
+
+        def __init__(self, config):
+            super(RibonanzaNet, self).__init__()
+            self.config = config
+
+            # ninp: inputの次元数
+            nhid = config.ninp * 4
+
+            self.transformer_encoder = []
+            print(f"constructing {config.nlayers} ConvTransformerEncoderLayers")
+
+            # ConvTransformerEncoderLayerをnlayers回繰り返す
+            for i in range(config.nlayers):
+                # 畳み込みのkernel sizeを指定する
+                if i != config.nlayers - 1:
+                    k = config.k
+                else:
+                    k = 1
+
+                self.transformer_encoder.append(
+                    ConvTransformerEncoderLayer(
+                        d_model=config.ninp,
+                        nhead=config.nhead,
+                        dim_feedforward=nhid,
+                        pairwise_dimension=config.pairwise_dimension,
+                        use_triangular_attention=config.use_triangular_attention,
+                        dropout=config.dropout,
+                        k=k
+                    )
+                )
+
+            # ConvTransformerEncoderLayerをnn.ModuleListに変換する
+            self.transformer_encoder = nn.ModuleList(self.transformer_encoder)
+
+            # ntoken: 語彙のサイズ (AUGC + padding/N token)
+            # padding_idx: paddingのindex (学習の対象にしない)
+            # ntokenの語彙数をninp次元の特徴ベクトルで表現する
+            self.encoder = nn.Embedding(config.ntoken, config.ninp, padding_idx=4)
+            # nclass: 分類の数 (要するに出力の次元数)
+            self.decoder = nn.Linear(config.ninp, config.nclass)
+
+            # sequence representationsをpairwise featuresに加算するためのouter_product_meanを計算する層
+            self.outer_product_mean = Outer_Product_Mean(in_dim=config.ninp, pairwise_dim=config.pairwise_dimension)
+            # 相対位置エンコーディングを計算する層
+            self.pos_encoder = relpos(config.pairwise_dimension)
+
+        def forward(self, src, src_mask=None, return_aw=False):
+            # src: input sequence [batch_size, len_seq]
+            B, L = src.shape
+            # src: [batch_size, len_seq] -> [batch_size, len_seq, ninp]
+            src = self.encoder(src).reshape(B, L, -1)
+
+            # outer_product_meanを計算する
+            pairwise_features = self.outer_product_mean(src)
+            # pairwise_featuresに位置情報を加算する
+            pairwise_features = pairwise_features + self.pos_encoder(src)
+
+            attention_weights = []
+            # ConvTransformerEncoderLayerをnlayers回繰り返す
+            for i, layer in enumerate(self.transformer_encoder):
+                if src_mask is not None:
+                    #src_key_padding_mask
+                    if return_aw:
+                        src, aw = layer(src, pairwise_features, src_mask, return_aw=return_aw)
+                        attention_weights.append(aw)
+                    else:
+                        src,pairwise_features = layer(src, pairwise_features, src_mask,return_aw=return_aw)
+                else:
+                    if return_aw:
+                        src, aw = layer(src, pairwise_features, return_aw=return_aw)
+                        attention_weights.append(aw)
+                    else:
+                        src, pairwise_features = layer(src, pairwise_features, return_aw=return_aw)
+
+            # 出力の次元に変換する
+            output = self.decoder(src).squeeze(-1) + pairwise_features.mean() * 0
+
+            if return_aw:
+                return output, attention_weights
+            else:
+                return output
+    ```
+    </details>
+
+11. Triangle Attention
+
+    triangle attentionは、pairwise featureに対して、3つの異なる塩基の三角形的な関係を考慮して更新するattention機構である。
+
+    以下は[John Jumer _et al._, _Nature_, (2021).](https://www.nature.com/articles/s41586-021-03819-2)より引用 ([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/))
+
+    > The triangular self-attention updates the pair representation in the Evoformer block.
+    > The “starting node” version updates the edge ij with values from all edges that share the same starting node i, (i.e. all edges ik).
+    > The decision whether edge ij will receive an update from edge ik is not only determined by their query-key similarity (as in standard attention), but also modulated by the information bjk derived from the third edge jk of this triangle.
+    > Furthermore we extend the update with an additional gating gij derived from edge ij.
+
+    "starting node" versionは、同じ出発ノードiを共有するすべてのエッジ（すなわち、すべてのエッジik）からの値でエッジijを更新する。
+    エッジijがエッジikからの更新を受けるかどうかの決定は、（標準的なattentionのように）それらのquery-keyの類似性によって決定されるだけでなく、この三角形の3番目のエッジjkから得られる情報bjkによっても変調される。
+    さらに、エッジijに由来する付加的なゲーティングgijで更新を拡張する。
+
+    以下は[John Jumer _et al._, _Nature_, (2021).](https://www.nature.com/articles/s41586-021-03819-2)より一部改変 ([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/))
+
+    ![](./figures/triangle_self_attention.png)
+
+    <details>
+    <summary>実装</summary>
+
+    ```python
+    class TriangleAttention(nn.Module):
+        def __init__(self, in_dim=128, dim=32, n_heads=4, wise='row'):
+            super(TriangleAttention, self).__init__()
+            self.n_heads = n_heads
+            self.wise = wise
+            self.norm = nn.LayerNorm(in_dim)
+            self.to_qkv = nn.Linear(in_dim, dim * 3 * n_heads, bias=False)
+            self.linear_for_pair = nn.Linear(in_dim, n_heads, bias=False)
+            self.to_gate = nn.Sequential(
+                nn.Linear(in_dim, in_dim),
+                nn.Sigmoid()
+            )
+            self.to_out = nn.Linear(n_heads * dim, in_dim)
+
+        def forward(self, z, src_mask):
+            """
+            how to do masking
+            for row tri attention:
+            attention matrix is brijh, where b is batch, r is row, h is head
+            so mask should be b()ijh, i.e. take self attention mask and unsqueeze(1,-1)
+            add negative inf to matrix before softmax
+
+            for col tri attention
+            attention matrix is bijlh, so take self attention mask and unsqueeze(3,-1)
+
+            take src_mask and spawn pairwise mask, and unsqueeze accordingly
+            """
+
+            # src_mask: [batch_size, len_seq]
+            src_mask[src_mask==0] = -1
+            src_mask = src_mask.unsqueeze(-1).float()
+            # attn_mask: [batch_size, len_seq, 1] * [batch_size, 1, len_seq] -> [batch_size, len_seq, len_seq]
+            attn_mask = torch.matmul(src_mask, src_mask.permute(0,2,1))
+
+            wise = self.wise
+            # z: [b, len_seq, len_seq, in_dim]
+            z = self.norm(z)
+
+            # self.to_qkv(z): [b, len_seq, len_seq, dim * 3 * n_heads]
+            # chunkして、q, k, vに分ける
+            # q, k, v: [batch_size, len_seq, len_seq, dim * n_heads]
+            q, k, v = torch.chunk(self.to_qkv(z), 3, -1)
+            # q, k, v: [batch_size, len_seq, len_seq, dim * n_heads] -> [batch_size, len_seq, len_seq, n_heads, dim]
+            q, k, v = map(lambda x: rearrange(x, 'b i j (h d)->b i j h d', h=self.n_heads), (q, k, v))
+
+            # b: [batch_size, len_seq, len_seq, dim]
+            b = self.linear_for_pair(z)
+
+            # gate: [batch_size, len_seq, len_seq, dim]
+            gate = self.to_gate(z)
+
+            # sqrt(dim)を計算 Scaled Dot-Product Attention のスケーリングと同じ
+            scale = q.size(-1) ** .5
+
+            if wise == 'row':
+                # q: [batch_size, row, col, head, dim]
+                # r: rowを固定して queryのi列目とkeyのj列目の内積を計算する
+                eq_attn = 'brihd,brjhd->brijh'
+
+                # v: [batch_size, row, col, head, dim]
+                # r: rowを固定して keyのj列目とvalueに対してattnのi列目の加重平均を計算する
+                # attnはsoftmaxを適用してあるので合計が1であり加重平均と捉えられる
+                eq_multi = 'brijh,brjhd->brihd'
+                # b: [batch_size, 1, len_seq, len_seq, dim]
+                b = rearrange(b, 'b i j (r h)->b r i j h', r=1)
+                softmax_dim = 3
+                # attn_mask: [batch_size, 1, len_seq, len_seq, 1]
+                attn_mask = rearrange(attn_mask, 'b i j->b 1 i j 1')
+
+            elif wise == 'col':
+                # q, k: [batch_size, row, col, head, dim]
+                # l: colを固定して queryのi行目とkeyのj行目の内積を計算する
+                eq_attn = 'bilhd,bjlhd->bijlh'
+
+                # v: [batch_size, row, col, head, dim]
+                # l: colを固定して keyのj行目とvalueに対してattnのi行目の加重平均を計算する
+                # attnはsoftmaxを適用してあるので合計が1であり加重平均と捉えられる
+                eq_multi = 'bijlh,bjlhd->bilhd'
+                # b: [batch_size, len_seq, len_seq, 1, dim]
+                b = rearrange(b, 'b i j (l h)->b i j l h', l=1)
+                softmax_dim = 2
+                # attn_mask: [batch_size, len_seq, len_seq, 1, 1]
+                attn_mask = rearrange(attn_mask, 'b i j->b i j 1 1')
+
+            else:
+                raise ValueError('wise should be col or row!')
+
+            # q, k, v: [batch_size, len_seq, len_seq, len_seq, n_heads, dim]
+            logits = (torch.einsum(eq_attn, q, k) / scale + b)
+
+            # maskを適用する
+            logits = logits.masked_fill(attn_mask == -1, float('-1e-9'))
+            # queryの次元に対してsoftmaxを適用する
+            attn = logits.softmax(softmax_dim)
+
+            # vにattention weightを掛け算する
+            out = torch.einsum(eq_multi, attn, v)
+
+            # out: [batch_size, len_seq, len_seq, n_heads, dim]
+            # rearrangeして、[batch_size, len_seq, len_seq, dim * n_heads]に変換する
+            # gateを掛け算する
+            out = gate * rearrange(out, 'b i j h d-> b i j (h d)')
+
+            # z_: [batch_size, len_seq, len_seq, in_dim]
+            z_ = self.to_out(out)
+            return z_
+    ```
+    </details>
