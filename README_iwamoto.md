@@ -863,8 +863,10 @@ torch.save(model.state_dict(),'RibonanzaNet-3D-final.pt')
     (RibonanzaNetでは、最大値を8にクリップしている。)
 
     > [!CAUTION]
+    >
     > RibonanzaNetでは1次元配列上の相対位置を取っているだけである。
     > 3次元構造を予測するうえではそれはどうなのか？
+    > 2次元構造の情報をいれるならここ？
 
     <details>
     <summary>実装</summary>
@@ -918,6 +920,7 @@ torch.save(model.state_dict(),'RibonanzaNet-3D-final.pt')
     <summary>実装</summary>
 
     > [!CAUTION]
+    >
     > 以下の実装は、上の図と異なるところがあるので注意 (理由は不明)
     > - `out_gate`の掛け算を線形層の前に適用している。 \
     > その場合、次元が合わないはずなのになぜコードが回るのか？
