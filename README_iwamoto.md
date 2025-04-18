@@ -906,7 +906,7 @@ torch.save(model.state_dict(),'RibonanzaNet-3D-final.pt')
             # 線形層にかける
             p = self.linear(d_onehot)
             return p
-        ```
+    ```
     </details>
 
 9. Triangle Multiplicative Module
@@ -924,6 +924,7 @@ torch.save(model.state_dict(),'RibonanzaNet-3D-final.pt')
     > 以下の実装は、上の図と異なるところがあるので注意 (理由は不明)
     > - `out_gate`の掛け算を線形層の前に適用している。 \
     > その場合、次元が合わないはずなのになぜコードが回るのか？
+    > - `out_gate`の線形層がfigだと`c_z->c_z`になっているが、 コードだと`c_z->hidden_dim`になっているので回る。
 
     ```python
     class TriangleMultiplicativeModule(nn.Module):
@@ -986,6 +987,8 @@ torch.save(model.state_dict(),'RibonanzaNet-3D-final.pt')
             x = self.norm(x)
 
             # xをleft_proj, right_projに通す
+            # left: [batch_size, len_seq, len_seq, hidden_dim]
+            # right: [batch_size, len_seq, len_seq, hidden_dim]
             left = self.left_proj(x)
             right = self.right_proj(x)
 
@@ -995,7 +998,7 @@ torch.save(model.state_dict(),'RibonanzaNet-3D-final.pt')
                 right = right * mask
 
             # xに対して、left_gate, right_gate, out_gateを計算し、sigmoid関数を適用する
-            # left_gate, right_gate, out_gate: [batch_size, len_seq, hidden_dim]
+            # left_gate, right_gate, out_gate: [batch_size, len_seq, len_seq, hidden_dim]
             left_gate = self.left_gate(x).sigmoid()
             right_gate = self.right_gate(x).sigmoid()
             out_gate = self.out_gate(x).sigmoid()
@@ -1027,6 +1030,7 @@ torch.save(model.state_dict(),'RibonanzaNet-3D-final.pt')
     RibonanzaNetは、ConvTransformerEncoderLayerを複数重ねた構造になっている。
 
     以下の図は[Shujun He _et al._, _bioRxiv_, (2021).](https://www.biorxiv.org/content/10.1101/2024.02.24.581671v1.article-info)より一部改変 ([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/))
+
     ![](./figures/ribonanzaNet.png)
 
 
@@ -1069,7 +1073,7 @@ torch.save(model.state_dict(),'RibonanzaNet-3D-final.pt')
             # ConvTransformerEncoderLayerをnn.ModuleListに変換する
             self.transformer_encoder = nn.ModuleList(self.transformer_encoder)
 
-            # ntoken: 語彙のサイズ (AUGC + padding/N token)
+            # ntoken: 語彙のサイズ (AUGC + P (padding) token)
             # padding_idx: paddingのindex (学習の対象にしない)
             # ntokenの語彙数をninp次元の特徴ベクトルで表現する
             self.encoder = nn.Embedding(config.ntoken, config.ninp, padding_idx=4)
@@ -1199,10 +1203,11 @@ torch.save(model.state_dict(),'RibonanzaNet-3D-final.pt')
             if wise == 'row':
                 # q: [batch_size, row, col, head, dim]
                 # r: rowを固定して queryのi列目とkeyのj列目の内積を計算する
+                # attn_weights: [batch_size, row, col, col, head]
                 eq_attn = 'brihd,brjhd->brijh'
 
                 # v: [batch_size, row, col, head, dim]
-                # r: rowを固定して keyのj列目とvalueに対してattnのi列目の加重平均を計算する
+                # r: rowを固定してvalueのj列目とattnのj列目の加重平均を計算する
                 # attnはsoftmaxを適用してあるので合計が1であり加重平均と捉えられる
                 eq_multi = 'brijh,brjhd->brihd'
                 # b: [batch_size, 1, len_seq, len_seq, dim]
@@ -1214,10 +1219,11 @@ torch.save(model.state_dict(),'RibonanzaNet-3D-final.pt')
             elif wise == 'col':
                 # q, k: [batch_size, row, col, head, dim]
                 # l: colを固定して queryのi行目とkeyのj行目の内積を計算する
+                # attn_weight: [batch_size, row, row, col, head]
                 eq_attn = 'bilhd,bjlhd->bijlh'
 
                 # v: [batch_size, row, col, head, dim]
-                # l: colを固定して keyのj行目とvalueに対してattnのi行目の加重平均を計算する
+                # l: colを固定してattn_weightのj行目とvalueのj行目の加重平均を計算する
                 # attnはsoftmaxを適用してあるので合計が1であり加重平均と捉えられる
                 eq_multi = 'bijlh,bjlhd->bilhd'
                 # b: [batch_size, len_seq, len_seq, 1, dim]
