@@ -5,6 +5,11 @@ conda activate rna_folding
 
 input_dir='./input'
 
+local competition="stanford-rna-3d-folding"
+kaggle competitions download -c $competition -p ${input_dir}
+unzip $input_dir/$competition.zip -d $input_dir/$competition
+rm $input_dir/$competition.zip
+
 datasets=("shujun717/ribonanzanet2d-final" "shujun717/ribonanzanet-weights")
 
 if ! command -v kaggle &> /dev/null; then
