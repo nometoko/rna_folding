@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 import plotly.graph_objects as go
 
@@ -46,6 +47,9 @@ class CifReader:
             "C": "green",
             "U": "orange",
         }
+
+        self.sequence_csv = "sequence.csv"
+        self.label_csv = "label.csv"
 
     def read(self):
         for chain_idx, chain_id in enumerate(self.ordered_chain_set):
@@ -113,6 +117,30 @@ class CifReader:
             metric_figure.append_trace(t, row=1, col=2)
 
         metric_figure.show()
+
+    def write_to_sequence_csv(self, file_dir: str):
+        for chain_id in self.ordered_chain_set:
+            features = self.features_dict[(self.entry_id, chain_id)]
+            sequence = features["sequence"]
+            target_id = self._get_target_id(chain_id)
+
+            chain_df = pd.DataFrame(
+                {
+                    "target_id": target_id,
+                    "sequence": sequence,
+                    "temporal_cutoff": features["temporal_cutoff"],
+                    "description": features["description"],
+                }
+            )
+
+            # Append to CSV file
+            file_path = os.path.join(file_dir, self.sequence_csv)
+            chain_df.to_csv(
+                file_path,
+                mode="a",
+                header=not pd.io.common.file_exists(file_path),
+                index=False,
+            )
 
     def _get_entry_id(self):
         return self.pmmcif.data["entry"]["id"][0]
