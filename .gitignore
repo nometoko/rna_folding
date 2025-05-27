@@ -180,3 +180,5 @@ protos/*
 !protos/.gitkeep
 
 .vscode/*
+
+.DS_Store

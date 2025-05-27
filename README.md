@@ -37,13 +37,13 @@
    % python
    >>> import torch
    >>> print(torch.cuda.is_available()) # CUDAが使えるか確認
-   True # CUDAが使える場合
+   True
    >>> print(torch.cuda.current_device()) # CUDAのデバイス番号を確認
-   0 # CUDAのデバイス番号を確認
+   0
    >>> print(torch.cuda.get_device_name(0)) # CUDAのデバイス名を確認
-   Tesla V100-PCIE-32GB # CUDAのデバイス名を確認
+   Tesla V100-PCIE-32GB
    >>> print(torch.cuda.device_count()) # CUDAのデバイス数を確認
-   4 # CUDAのデバイス数を確認
+   4
    ```
 ### Share Environment
 
@@ -74,3 +74,17 @@ Anacondaの場合、`environment.yaml`を介してパッケージのバージョ
 ``` zsh
 % ./install_dataset.sh
 ```
+
+### 数式について
+githubのmarkdownで数式のレンダリングがうまくいかないので、数式は画像にして表示します。
+pdfだと表示ができないので、pngに変換して表示します。
+そのスクリプトが[`figures/latex2img.py`](./figures/latex2img.py)です。
+
+8行目以降の、`formulas`の部分を変更することで、数式を変更できます。
+1個目の要素には数式を、2個目の要素には保存する画像の名前を入れます。
+
+``` zsh
+% python figures/latex2img.py
+```
+
+これで、`figures/math_figures`に数式の画像が保存されます。
