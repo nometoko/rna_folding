@@ -2,6 +2,8 @@ import polars as pl
 from Dataset import *
 from Network import *
 from Functions import *
+from dMAELoss import dMAELoss
+
 from tqdm import tqdm
 from sklearn.model_selection import KFold, StratifiedKFold
 from ranger import Ranger
@@ -187,8 +189,8 @@ print(f"Total number of parameters in the model: {total_params}")
 
 optimizer = Ranger(model.parameters(),weight_decay=config.weight_decay, lr=config.learning_rate)
 
-criterion=torch.nn.L1Loss(reduction='none')
-val_criterion=torch.nn.L1Loss(reduction='none')
+criterion = dMAELoss()
+val_criterion = dMAELoss()
 
 #.to(accelerator.device)#.cuda().float()
 
@@ -210,20 +212,20 @@ for epoch in range(config.epochs):
     #for batch in tqdm(train_loader):
 
     for idx, batch in enumerate(tbar):
-        
+
         src=batch['sequence']#.cuda()
         masks=batch['masks'].bool()#.cuda()
         labels=batch['labels']#.cuda()
         SN=batch['SN']
 
-        
+
 
         bs=len(labels)
         #batch_attention_mask=batch['attention_mask'].unsqueeze(1)[:,:,:src.shape[-1],:src.shape[-1]]
 
         loss_masks=batch['loss_masks']#.cuda()
         errors=batch['errors']#.cuda()#.un
-#SSH FS test 
+#SSH FS test
         SN=SN.reshape(SN.shape[0],1,SN.shape[1])>=1
         loss_masks=loss_masks*SN
 
@@ -244,7 +246,7 @@ for epoch in range(config.epochs):
             loss=loss.mean()
 
         accelerator.backward(loss/config.gradient_accumulation_steps)
-        
+
         #loss.backward()
         if (idx + 1) % config.gradient_accumulation_steps == 0:
             if accelerator.sync_gradients:
@@ -254,11 +256,11 @@ for epoch in range(config.epochs):
             if epoch > cos_epoch:
                 lr_schedule.step()
 
-        
+
         total_loss+=loss.item()
         #exit()
         tbar.set_description(f"Epoch {epoch + 1} Loss: {total_loss/(idx+1)}")
-        
+
 
         #break
     train_loss=total_loss/(idx+1)
@@ -329,7 +331,7 @@ for epoch in range(config.epochs):
 
         tbar.set_description(f"Epoch {epoch + 1} Val Loss: {val_loss/(idx+1)}")
 
-        
+
 
     #val_loss=val_loss/len(tbar)
 
