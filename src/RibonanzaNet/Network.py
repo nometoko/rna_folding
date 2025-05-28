@@ -152,7 +152,7 @@ class MultiHeadAttention(nn.Module):
 
 class ConvTransformerEncoderLayer(nn.Module):
 
-    def __init__(self, d_model, nhead, 
+    def __init__(self, d_model, nhead,
                  dim_feedforward, pairwise_dimension, use_triangular_attention, dropout=0.1, k = 3,
                  ):
         super(ConvTransformerEncoderLayer, self).__init__()
@@ -209,7 +209,7 @@ class ConvTransformerEncoderLayer(nn.Module):
 
 
     def forward(self, src , pairwise_features, src_mask=None, return_aw=False):
-        
+
         src = src*src_mask.float().unsqueeze(-1)
 
         res = src
@@ -223,7 +223,7 @@ class ConvTransformerEncoderLayer(nn.Module):
         pairwise_bias=self.pairwise2heads(self.pairwise_norm(pairwise_features)).permute(0,3,1,2)
         #print(src.shape)
         src2,attention_weights = self.self_attn(src, src, src, mask=pairwise_bias, src_mask=src_mask)
-        
+
 
         src = src + self.dropout1(src2)
         src = self.norm1(src)
@@ -279,7 +279,7 @@ class Outer_Product_Mean(nn.Module):
         if pair_rep is not None:
             outer_product=outer_product+pair_rep
 
-        return outer_product 
+        return outer_product
 
 class relpos(nn.Module):
 
@@ -391,12 +391,13 @@ class RibonanzaNet(nn.Module):
                 k=1
             #print(k)
             self.transformer_encoder.append(ConvTransformerEncoderLayer(d_model = config.ninp, nhead = config.nhead,
-                                                                        dim_feedforward = nhid, 
+                                                                        dim_feedforward = nhid,
                                                                         pairwise_dimension= config.pairwise_dimension,
                                                                         use_triangular_attention=config.use_triangular_attention,
                                                                         dropout = config.dropout, k=k))
         self.transformer_encoder= nn.ModuleList(self.transformer_encoder)
         self.encoder = nn.Embedding(config.ntoken, config.ninp, padding_idx=4)
+        # ここのデコーダーは、最終的な出力の次元を決定。
         self.decoder = nn.Linear(config.ninp,config.nclass)
         # if config.use_bpp:
         #     self.mask_dense=nn.Conv2d(2,config.nhead//4,1)
@@ -410,7 +411,7 @@ class RibonanzaNet(nn.Module):
         B,L=src.shape
         src = src
         src = self.encoder(src).reshape(B,L,-1)
-        
+
         #spawn outer product
         # outer_product = torch.einsum('bid,bjc -> bijcd', src, src)
         # outer_product = rearrange(outer_product, 'b i j c d -> b i j (c d)')
@@ -436,7 +437,8 @@ class RibonanzaNet(nn.Module):
                 else:
                     src,pairwise_features=layer(src, pairwise_features, return_aw=return_aw)
             #print(src.shape)
-        output = self.decoder(src).squeeze(-1)+pairwise_features.mean()*0
+        # *0で意味ないのに足してるのよくわからん。(B,L,3)の形にするため、.squeeze(-1)を削除した
+        output = self.decoder(src)+pairwise_features.mean()*0
 
 
         if return_aw:
@@ -530,4 +532,4 @@ if __name__ == "__main__":
     # src_mask=torch.ones(6,16)
     # src_mask[:,12:16]=0
     # out=tri_attention(dummy, src_mask, )
-    # print(out.shape) 
+    # print(out.shape)

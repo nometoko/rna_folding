@@ -9,7 +9,7 @@ weight_decay: 0.0001
 k: 5
 ninp: 256
 nlayers: 9
-nclass: 2
+nclass: 3 # 今回、x,y,zの3値を予測することが確定ゆえ、このハイパラは固定
 ntoken: 5 #AUGC + padding/N token
 nhead: 8
 #use_bpp: False
