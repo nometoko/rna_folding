@@ -53,12 +53,15 @@ class CifReader:
 
     def read(self):
         for chain_idx, chain_id in enumerate(self.ordered_chain_set):
-            sequence = self._get_sequence(chain_id, chain_idx)
+            try:
+                sequence = self._get_sequence(chain_id, chain_idx)
+                label = self._get_labels(chain_id, sequence)
+            except Exception:
+                continue
             temporal_cutoff = self.last_revision_date
             description = self._get_description(chain_idx)
 
             # -- XYZ COORDINATES ----------
-            label = self._get_labels(chain_id, sequence)
 
             # --  STORE DATA ----------------------------------------
             self.features_dict[(self.entry_id, chain_id)] = {
@@ -120,14 +123,17 @@ class CifReader:
 
     def write_to_sequence_csv(self, file_dir: str):
         for chain_id in self.ordered_chain_set:
-            features = self.features_dict[(self.entry_id, chain_id)]
+            try:
+                features = self.features_dict[(self.entry_id, chain_id)]
+            except KeyError:
+                continue
             sequence = features["sequence"]
             target_id = self._get_target_id(chain_id)
 
             chain_df = pd.DataFrame(
                 {
-                    "target_id": target_id,
-                    "sequence": sequence,
+                    "target_id": [target_id],
+                    "sequence": [sequence],
                     "temporal_cutoff": features["temporal_cutoff"],
                     "description": features["description"],
                 }
@@ -141,6 +147,37 @@ class CifReader:
                 header=not pd.io.common.file_exists(file_path),
                 index=False,
             )
+
+    def write_to_label_csv(self, file_dir: str):
+        file_path = os.path.join(file_dir, self.label_csv)
+
+        for chain_id in self.ordered_chain_set:
+            try:
+                features = self.features_dict[(self.entry_id, chain_id)]
+            except Exception:
+                continue
+
+            sequence = features["sequence"]
+            label = features["label"]
+            target_id = self._get_target_id(chain_id)
+
+            for i, res in enumerate(sequence):
+                res_df = pd.DataFrame(
+                    {
+                        "ID": [f"{target_id}_{i}"],
+                        "resname": [res],
+                        "res_id": i,
+                        "x_1": label[i, 0],
+                        "y_1": label[i, 1],
+                        "z_1": label[i, 2],
+                    }
+                )
+                res_df.to_csv(
+                    file_path,
+                    mode="a",
+                    header=not pd.io.common.file_exists(file_path),
+                    index=False,
+                )
 
     def _get_entry_id(self):
         return self.pmmcif.data["entry"]["id"][0]
@@ -177,34 +214,34 @@ class CifReader:
 
         return c1_df
 
-    def _get_target_id(self, chain_id: str):
+    def _get_target_id(self, chain_id: str) -> str:
         return f"{self.entry_id}_{chain_id}"
 
     def _get_sequence(self, chain_id: str, chain_idx: int):
-        seq_list = self.pmmcif.data["entity_poly"]["pdbx_seq_one_letter_code_can"]
-
-        if self.chain_num > len(seq_list) - 1:
-            sequence = seq_list[0].replace("\n", "")
-        else:
-            sequence = seq_list[chain_idx].replace("\n", "")
+        # seq_list = self.pmmcif.data["entity_poly"]["pdbx_seq_one_letter_code_can"]
+        #
+        # if self.chain_num > len(seq_list) - 1:
+        #     sequence = seq_list[0].replace("\n", "")
+        # else:
+        #     sequence = seq_list[chain_idx].replace("\n", "")
 
         # If sequence is empty in one_letter_code part, extracting sequence from ATOM df
-        if sequence == "":
-            chain_mask = self.atoms["label_asym_id"] == chain_id
-            chain_df = self.atoms[chain_mask]
-            sequence_extraction_df = chain_df[["label_comp_id", "label_seq_id"]]
+        # if sequence == "":
+        chain_mask = self.atoms["label_asym_id"] == chain_id
+        chain_df = self.atoms[chain_mask]
+        sequence_extraction_df = chain_df[["label_comp_id", "label_seq_id"]]
 
-            if type(sequence_extraction_df) is not pd.DataFrame:
-                raise TypeError(
-                    "Invalid data type for sequence_extraction_df. Expected DataFrame."
-                )
+        if type(sequence_extraction_df) is not pd.DataFrame:
+            raise TypeError(
+                "Invalid data type for sequence_extraction_df. Expected DataFrame."
+            )
 
-            # get list of residue name from chain id and join them
-            # label_comp_id: Residue name
-            sequence = sequence_extraction_df.groupby(
-                "label_seq_id", sort=False, as_index=False
-            ).agg(lambda x: list(set(x))[0])["label_comp_id"]
-            sequence = "".join(sequence)
+        # get list of residue name from chain id and join them
+        # label_comp_id: Residue name
+        sequence = sequence_extraction_df.groupby(
+            "label_seq_id", sort=False, as_index=False
+        ).agg(lambda x: list(set(x))[0])["label_comp_id"]
+        sequence = "".join(sequence)
 
         if len(set(sequence) - {"A", "C", "G", "U"}) > 0:
             raise ValueError(

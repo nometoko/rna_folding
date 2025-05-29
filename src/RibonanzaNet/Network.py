@@ -115,7 +115,7 @@ class MultiHeadAttention(nn.Module):
         self.w_qs = nn.Linear(d_model, n_head * d_k, bias=False)
         self.w_ks = nn.Linear(d_model, n_head * d_k, bias=False)
         self.w_vs = nn.Linear(d_model, n_head * d_v, bias=False)
-        self.rope = RotaryPositionalEmbedding(d_model)
+        self.rope = RotaryPositionalEmbedding(dim=d_k)
 
         self.fc = nn.Linear(n_head * d_v, d_model, bias=False)
 
@@ -147,9 +147,13 @@ class MultiHeadAttention(nn.Module):
         # print(k.shape)
         # print(v.shape)
         if src_mask is not None:
-            src_mask[src_mask == 0] = -1
-            src_mask = src_mask.unsqueeze(-1).float()
-            attn_mask = torch.matmul(src_mask, src_mask.permute(0, 2, 1)).unsqueeze(1)
+            src_mask_tmp = src_mask.clone()
+            src_mask_tmp = (
+                src_mask_tmp.masked_fill(src_mask_tmp == 0, -1).unsqueeze(-1).float()
+            )
+            attn_mask = torch.matmul(
+                src_mask_tmp, src_mask_tmp.permute(0, 2, 1)
+            ).unsqueeze(1)
             q, attn = self.attention(q, k, v, mask=mask, attn_mask=attn_mask)
         else:
             q, attn = self.attention(q, k, v, mask=mask)
@@ -160,7 +164,7 @@ class MultiHeadAttention(nn.Module):
         # print(q.shape)
         # exit()
         q = self.dropout(self.fc(q))
-        q += residual
+        q = q + residual
 
         q = self.layer_norm(q)
 
@@ -233,7 +237,7 @@ class ConvTransformerEncoderLayer(nn.Module):
         self.pair_transition = nn.Sequential(
             nn.LayerNorm(pairwise_dimension),
             nn.Linear(pairwise_dimension, pairwise_dimension * 4),
-            nn.ReLU(inplace=True),
+            nn.ReLU(inplace=False),
             nn.Linear(pairwise_dimension * 4, pairwise_dimension),
         )
 
@@ -449,51 +453,41 @@ class RibonanzaNet(nn.Module):
         self.outer_product_mean = Outer_Product_Mean(
             in_dim=config.ninp, pairwise_dim=config.pairwise_dimension
         )
-        self.pos_encoder = relpos(config.pairwise_dimension)
+        # self.pos_encoder = relpos(config.pairwise_dimension)
 
     def forward(self, src, src_mask=None, return_aw=False):
+        """
+        src: LongTensor (B, L) – 塩基 ID 列
+        src_mask: Bool/FloatTensor (B, L) – True(1)=有効、False(0)=pad
+        """
         B, L = src.shape
-        src = src
-        src = self.encoder(src).reshape(B, L, -1)
 
-        # spawn outer product
-        # outer_product = torch.einsum('bid,bjc -> bijcd', src, src)
-        # outer_product = rearrange(outer_product, 'b i j c d -> b i j (c d)')
-        # print(outer_product.shape)
-        pairwise_features = self.outer_product_mean(src)
-        pairwise_features = pairwise_features + self.pos_encoder(src)
-        # print(pairwise_features.shape)
-        # exit()
+        # ────────────────────────────────────────────────
+        # 1. src_mask が None なら「pad!=4」のブーリアンマスクを自動生成
+        #    Embedding の padding_idx と必ず合わせ、デバイスも揃える
+        # ────────────────────────────────────────────────
+        if src_mask is None:
+            pad_idx = self.encoder.padding_idx  # =4
+            src_mask = (src != pad_idx).float().to(src.device)  # (B, L) → float32
+
+        # ここから先は従来通り
+        src_emb = self.encoder(src).reshape(B, L, -1)
+
+        pairwise_features = self.outer_product_mean(src_emb)
 
         attention_weights = []
-        for i, layer in enumerate(self.transformer_encoder):
-            if src_mask is not None:
-                # src_key_padding_mask
-                if return_aw:
-                    src, aw = layer(
-                        src, pairwise_features, src_mask, return_aw=return_aw
-                    )
-                    attention_weights.append(aw)
-                else:
-                    src, pairwise_features = layer(
-                        src, pairwise_features, src_mask, return_aw=return_aw
-                    )
+        for layer in self.transformer_encoder:
+            if return_aw:
+                src_emb, aw = layer(
+                    src_emb, pairwise_features, src_mask, return_aw=True
+                )
+                attention_weights.append(aw)
             else:
-                if return_aw:
-                    src, aw = layer(src, pairwise_features, return_aw=return_aw)
-                    attention_weights.append(aw)
-                else:
-                    src, pairwise_features = layer(
-                        src, pairwise_features, return_aw=return_aw
-                    )
-            # print(src.shape)
-        # *0で意味ないのに足してるのよくわからん。(B,L,3)の形にするため、.squeeze(-1)を削除した
-        output = self.decoder(src) + pairwise_features.mean() * 0
+                src_emb, pairwise_features = layer(src_emb, pairwise_features, src_mask)
 
-        if return_aw:
-            return output, attention_weights
-        else:
-            return output
+        output = self.decoder(src_emb) + pairwise_features.mean() * 0  # (B, L, 3)
+
+        return (output, attention_weights) if return_aw else output
 
 
 class TriangleAttention(nn.Module):
@@ -524,9 +518,11 @@ class TriangleAttention(nn.Module):
         """
 
         # spwan pair mask
-        src_mask[src_mask == 0] = -1
-        src_mask = src_mask.unsqueeze(-1).float()
-        attn_mask = torch.matmul(src_mask, src_mask.permute(0, 2, 1))
+        # src_mask[src_mask == 0] = -1
+        mask = src_mask.clone()
+        mask = mask.masked_fill(mask == 0, -1)
+        mask = mask.unsqueeze(-1).float()
+        attn_mask = torch.matmul(mask, mask.permute(0, 2, 1))
 
         wise = self.wise
         z = self.norm(z)

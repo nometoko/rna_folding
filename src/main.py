@@ -11,7 +11,7 @@ def main():
             print(f"Processing {full_path}")
             reader = CifReader(full_path)
             reader.read()
-            reader.write_to_train_csv(".")
+            reader.write_to_sequence_csv(".")
             print(f"Finished processing {full_path}")
 
 
